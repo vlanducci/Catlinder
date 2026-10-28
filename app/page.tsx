@@ -1,5 +1,5 @@
 
-import Calendar from "@/components/Calendar";
+import CalendarLoader from "@/components/CalendarLoader";
 import ThemeToggle from "@/components/ThemeToggle";
 
 export default function Home() {
@@ -10,7 +10,7 @@ export default function Home() {
         <ThemeToggle />
       </header>
 
-      <Calendar />
+      <CalendarLoader />
     </main>
   );
 }

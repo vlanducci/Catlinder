@@ -1,7 +1,6 @@
 
 "use client";
 
-import { useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/react/daygrid";
 import timeGridPlugin from "@fullcalendar/react/timegrid";
@@ -10,6 +9,7 @@ import themePlugin from "@fullcalendar/react/themes/pulse";
 import "@fullcalendar/react/skeleton.css";
 import "@fullcalendar/react/themes/pulse/theme.css";
 import EventModal from "./EventModal";
+import { useEffect, useState } from "react";
 
 const defaultColor = "#60a5fa";
 
@@ -111,6 +111,11 @@ export default function Calendar() {
     );
     setIsOpen(false);
   };
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   return (
     <>
