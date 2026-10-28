@@ -112,9 +112,11 @@ export default function Calendar() {
     setIsOpen(false);
   };
   const [isMounted, setIsMounted] = useState(false);
+  const [today, setToday] = useState("");
 
   useEffect(() => {
     setIsMounted(true);
+    setToday(getLocalDate());
   }, []);
 
   return (
