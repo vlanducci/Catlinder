@@ -11,11 +11,14 @@ import "@fullcalendar/react/skeleton.css";
 import "@fullcalendar/react/themes/pulse/theme.css";
 import EventModal from "./EventModal";
 
+const defaultColor = "#60a5fa";
+
 type CalendarEvent = {
   id: string;
   title: string;
   start: string;
   end: string;
+  color: string;
 };
 
 export default function Calendar() {
@@ -24,6 +27,7 @@ export default function Calendar() {
   const [title, setTitle] = useState("");
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("10:00");
+  const [color, setColor] = useState(defaultColor);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -40,6 +44,7 @@ export default function Calendar() {
     setTitle("");
     setStartTime("09:00");
     setEndTime("10:00");
+    setColor(defaultColor);
     setEditingEventId(null);
     setIsOpen(true);
   };
@@ -49,6 +54,7 @@ export default function Calendar() {
     title: string;
     start: Date | null;
     end: Date | null;
+    color: string;
   }) => {
     if (!event.start) return;
 
@@ -63,6 +69,7 @@ export default function Calendar() {
     );
     setStartTime(`${pad(date.getHours())}:${pad(date.getMinutes())}`);
     setEndTime(`${pad(end.getHours())}:${pad(end.getMinutes())}`);
+    setColor(event.color || defaultColor);
     setIsOpen(true);
   };
 
@@ -75,14 +82,13 @@ export default function Calendar() {
       title,
       start: `${selectedDate}T${startTime}:00`,
       end: `${selectedDate}T${endTime}:00`,
+      color,
     };
 
     if (editingEventId) {
       setEvents((previous) =>
         previous.map((event) =>
-          event.id === editingEventId
-            ? { ...event, ...eventData }
-            : event
+          event.id === editingEventId ? { ...event, ...eventData } : event
         )
       );
     } else {
@@ -115,13 +121,18 @@ export default function Calendar() {
         ]}
         initialView="dayGridMonth"
         height="auto"
+        eventDisplay="block"
+        eventColor={defaultColor}
         dateClick={(info) => openModal(info.dateStr)}
-        eventClick={(info) => editEvent({
-          id: info.event.id,
-          title: info.event.title,
-          start: info.event.start,
-          end: info.event.end,
-        })}
+        eventClick={(info) =>
+          editEvent({
+            id: info.event.id,
+            title: info.event.title,
+            start: info.event.start,
+            end: info.event.end,
+            color: info.event.color,
+          })
+        }
         headerToolbar={{
           left: "prev,today,next",
           center: "title",
@@ -133,7 +144,14 @@ export default function Calendar() {
             click: () => openModal(getLocalDate()),
           },
         }}
-        events={events}
+        events={events.map((event) => ({
+          id: event.id,
+          title: event.title,
+          start: event.start,
+          end: event.end,
+          color: event.color,
+          contrastColor: "#1e293b",
+        }))}
       />
 
       {isOpen && (
@@ -142,10 +160,12 @@ export default function Calendar() {
           title={title}
           startTime={startTime}
           endTime={endTime}
+          color={color}
           setSelectedDate={setSelectedDate}
           setTitle={setTitle}
           setStartTime={setStartTime}
           setEndTime={setEndTime}
+          setColor={setColor}
           onClose={() => setIsOpen(false)}
           onSave={saveEvent}
           onDelete={deleteEvent}

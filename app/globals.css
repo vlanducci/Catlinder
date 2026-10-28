@@ -1,9 +1,35 @@
+
+
 @import "tailwindcss";
 
-
 :root {
-    --background: #0a0a0a; 
-    --foreground: #ededed;
+  color-scheme: light;
+  --background: #f8fafc;
+  --foreground: #1e293b;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --muted: #64748b;
+  --accent: #4f46e5;
+  --calendar-today: #eef2ff;
+  --event-color-01: #f87171;
+  --event-color-02: #fbbf24;
+  --event-color-03: #34d399;
+  --event-color-04: #60a5fa;
+}
+
+html.dark {
+  color-scheme: dark;
+  --background: #0f172a;
+  --foreground: #e2e8f0;
+  --surface: #1e293b;
+  --border: #334155;
+  --muted: #94a3b8;
+  --accent: #818cf8;
+  --calendar-today: #263449;
+  --event-color-01: #f87171;
+  --event-color-02: #fbbf24;
+  --event-color-03: #34d399;
+  --event-color-04: #60a5fa;
 }
 
 @theme inline {
@@ -13,15 +39,89 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a; 
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
+  min-height: 100%;
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.fc {
+  color: var(--foreground);
+}
+
+.fc .fc-toolbar-title {
+  color: var(--foreground);
+}
+
+.fc .fc-button {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.fc .fc-button:hover,
+.fc .fc-button:focus {
+  background: var(--calendar-today);
+  border-color: var(--border);
+  color: var(--foreground);
+  box-shadow: none;
+}
+
+.fc .fc-button-primary:not(:disabled).fc-button-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.fc .fc-scrollgrid,
+.fc td,
+.fc th,
+.fc .fc-scrollgrid-section > * {
+  border-color: var(--border);
+}
+
+.fc .fc-col-header-cell,
+.fc .fc-timegrid-slot,
+.fc .fc-daygrid-day {
+  background: var(--surface);
+}
+
+.fc .fc-daygrid-day-number,
+.fc .fc-col-header-cell-cushion,
+.fc .fc-timegrid-axis-cushion,
+.fc .fc-timegrid-slot-label-cushion {
+  color: var(--foreground);
+}
+
+.fc .fc-day-today {
+  background: var(--calendar-today) !important;
+}
+
+.fc .fc-daygrid-event {
+  cursor: pointer;
+}
+
+
+.fc .fc-event {
+  border-width: 1px;
+}
+
+.fc .fc-daygrid-event,
+.fc .fc-timegrid-event {
+  cursor: pointer;
+}
+
+.fc .fc-event .fc-event-main {
+  color: inherit;
+}
+
+.fc .fc-event {
+  border-width: 1px;
+}
+
+.fc .fc-event .fc-event-main {
+  color: #1e293b;
 }
