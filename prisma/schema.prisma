@@ -1,3 +1,4 @@
+
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -7,24 +8,32 @@ datasource db {
   provider = "postgresql"
 }
 
-model Post {
-  id        String  @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean @default(false)
-  author    User?   @relation(fields: [authorId], references: [id])
-  authorId  String?
-}
-
 model User {
   id        String   @id @default(cuid())
   vercelId  String   @unique @map("vercel_id")
   name      String?
   email     String?  @unique
   image     String?
-  createdAt DateTime @default(now()) @map(name: "created_at")
-  updatedAt DateTime @updatedAt @map(name: "updated_at")
-  posts     Post[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  events    Event[]
 
-  @@map(name: "users")
+  @@map("users")
+}
+
+model Event {
+  id        String   @id @default(cuid())
+  title     String
+  start     DateTime
+  end       DateTime
+  color     String   @default("#60a5fa")
+  allDay    Boolean  @default(false) @map("all_day")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, start])
+  @@map("events")
 }
