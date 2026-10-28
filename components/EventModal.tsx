@@ -12,6 +12,8 @@ type EventModalProps = {
   setEndTime: (value: string) => void;
   onClose: () => void;
   onSave: (e: React.FormEvent<HTMLFormElement>) => void;
+  onDelete: () => void;
+  isEditing: boolean;
 };
 
 export default function EventModal({
@@ -25,6 +27,8 @@ export default function EventModal({
   setEndTime,
   onClose,
   onSave,
+  onDelete,
+  isEditing,
 }: EventModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -33,8 +37,14 @@ export default function EventModal({
         className="w-full max-w-md space-y-4 rounded-xl bg-white p-6 text-gray-900 shadow-xl"
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">New event</h2>
-          <button type="button" onClick={onClose} className="text-2xl text-gray-500">
+          <h2 className="text-xl font-semibold">
+            {isEditing ? "Edit event" : "New event"}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-2xl text-gray-500"
+          >
             ×
           </button>
         </div>
@@ -87,20 +97,32 @@ export default function EventModal({
           </label>
         </div>
 
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-gray-300 px-4 py-2"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-white"
-          >
-            Save event
-          </button>
+        <div className="flex items-center justify-between gap-2">
+          {isEditing && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="rounded-lg border border-red-300 px-4 py-2 text-red-600"
+            >
+              Delete
+            </button>
+          )}
+
+          <div className="ml-auto flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-gray-300 px-4 py-2"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-white"
+            >
+              {isEditing ? "Save changes" : "Create event"}
+            </button>
+          </div>
         </div>
       </form>
     </div>

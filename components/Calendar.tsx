@@ -12,9 +12,10 @@ import "@fullcalendar/react/themes/pulse/theme.css";
 import EventModal from "./EventModal";
 
 type CalendarEvent = {
+  id: string;
   title: string;
   start: string;
-  end?: string;
+  end: string;
 };
 
 export default function Calendar() {
@@ -23,6 +24,7 @@ export default function Calendar() {
   const [title, setTitle] = useState("");
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("10:00");
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
 
   const getLocalDate = () => {
@@ -38,25 +40,67 @@ export default function Calendar() {
     setTitle("");
     setStartTime("09:00");
     setEndTime("10:00");
+    setEditingEventId(null);
+    setIsOpen(true);
+  };
+
+  const editEvent = (event: {
+    id: string;
+    title: string;
+    start: Date | null;
+    end: Date | null;
+  }) => {
+    if (!event.start) return;
+
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const date = event.start;
+    const end = event.end ?? new Date(date.getTime() + 60 * 60 * 1000);
+
+    setEditingEventId(event.id);
+    setTitle(event.title);
+    setSelectedDate(
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    );
+    setStartTime(`${pad(date.getHours())}:${pad(date.getMinutes())}`);
+    setEndTime(`${pad(end.getHours())}:${pad(end.getMinutes())}`);
     setIsOpen(true);
   };
 
   const saveEvent = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (endTime <= startTime) {
-      return;
+    if (endTime <= startTime) return;
+
+    const eventData = {
+      title,
+      start: `${selectedDate}T${startTime}:00`,
+      end: `${selectedDate}T${endTime}:00`,
+    };
+
+    if (editingEventId) {
+      setEvents((previous) =>
+        previous.map((event) =>
+          event.id === editingEventId
+            ? { ...event, ...eventData }
+            : event
+        )
+      );
+    } else {
+      setEvents((previous) => [
+        ...previous,
+        { id: crypto.randomUUID(), ...eventData },
+      ]);
     }
 
-    setEvents((previous) => [
-      ...previous,
-      {
-        title,
-        start: `${selectedDate}T${startTime}:00`,
-        end: `${selectedDate}T${endTime}:00`,
-      },
-    ]);
+    setIsOpen(false);
+  };
 
+  const deleteEvent = () => {
+    if (!editingEventId) return;
+
+    setEvents((previous) =>
+      previous.filter((event) => event.id !== editingEventId)
+    );
     setIsOpen(false);
   };
 
@@ -71,8 +115,13 @@ export default function Calendar() {
         ]}
         initialView="dayGridMonth"
         height="auto"
-        selectable={false}
         dateClick={(info) => openModal(info.dateStr)}
+        eventClick={(info) => editEvent({
+          id: info.event.id,
+          title: info.event.title,
+          start: info.event.start,
+          end: info.event.end,
+        })}
         headerToolbar={{
           left: "prev,today,next",
           center: "title",
@@ -99,6 +148,8 @@ export default function Calendar() {
           setEndTime={setEndTime}
           onClose={() => setIsOpen(false)}
           onSave={saveEvent}
+          onDelete={deleteEvent}
+          isEditing={editingEventId !== null}
         />
       )}
     </>
