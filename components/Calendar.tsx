@@ -1,4 +1,3 @@
-
 "use client";
 
 import FullCalendar from "@fullcalendar/react";
@@ -9,6 +8,8 @@ import themePlugin from "@fullcalendar/react/themes/pulse";
 import "@fullcalendar/react/skeleton.css";
 import "@fullcalendar/react/themes/pulse/theme.css";
 import EventModal from "./EventModal";
+import ThemeToggle from "./ThemeToggle";
+import { signOut } from "next-auth/react";
 import { useEffect, useState } from "react";
 
 const defaultColor = "#60a5fa";
@@ -31,6 +32,8 @@ export default function Calendar() {
   const [color, setColor] = useState(defaultColor);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+  const [today, setToday] = useState("");
 
   const getLocalDate = () => {
     const date = new Date();
@@ -69,6 +72,9 @@ export default function Calendar() {
     setSelectedDate(
       `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
     );
+    setEndDate(
+      `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`
+    );
     setStartTime(`${pad(date.getHours())}:${pad(date.getMinutes())}`);
     setEndTime(`${pad(end.getHours())}:${pad(end.getMinutes())}`);
     setColor(event.color || defaultColor);
@@ -78,7 +84,9 @@ export default function Calendar() {
   const saveEvent = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (endTime <= startTime) return;
+    if (endDate < selectedDate || (endDate === selectedDate && endTime <= startTime)) {
+      return;
+    }
 
     const eventData = {
       title,
@@ -111,8 +119,6 @@ export default function Calendar() {
     );
     setIsOpen(false);
   };
-  const [isMounted, setIsMounted] = useState(false);
-  const [today, setToday] = useState("");
 
   useEffect(() => {
     setIsMounted(true);
@@ -120,48 +126,65 @@ export default function Calendar() {
   }, []);
 
   return (
-    <>
-      <FullCalendar
-        plugins={[
-          themePlugin,
-          dayGridPlugin,
-          timeGridPlugin,
-          interactionPlugin,
-        ]}
-        initialView="dayGridMonth"
-        height="auto"
-        eventDisplay="block"
-        eventColor={defaultColor}
-        dateClick={(info) => openModal(info.dateStr)}
-        eventClick={(info) =>
-          editEvent({
-            id: info.event.id,
-            title: info.event.title,
-            start: info.event.start,
-            end: info.event.end,
-            color: info.event.color,
-          })
-        }
-        headerToolbar={{
-          left: "prev,today,next",
-          center: "title",
-          right: "addEvent dayGridMonth,timeGridWeek,timeGridDay",
-        }}
-        buttons={{
-          addEvent: {
-            text: "Add Event",
-            click: () => openModal(getLocalDate()),
-          },
-        }}
-        events={events.map((event) => ({
-          id: event.id,
-          title: event.title,
-          start: event.start,
-          end: event.end,
-          color: event.color,
-          contrastColor: "#1e293b",
-        }))}
-      />
+    <main className="min-h-screen bg-[var(--background)] p-4 text-[var(--foreground)] sm:p-6">
+      <header className="mb-6 flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Catlinder</h1>
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          <button
+            type="button"
+            onClick={() => signOut({ callbackUrl: "/signin" })}
+            className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-medium transition hover:bg-[var(--card)]"
+          >
+            Sign out
+          </button>
+        </div>
+      </header>
+
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 sm:p-5">
+        <FullCalendar
+          plugins={[
+            themePlugin,
+            dayGridPlugin,
+            timeGridPlugin,
+            interactionPlugin,
+          ]}
+          initialView="dayGridMonth"
+          height="auto"
+          eventDisplay="block"
+          eventColor={defaultColor}
+          dateClick={(info) => openModal(info.dateStr)}
+          eventClick={(info) =>
+            editEvent({
+              id: info.event.id,
+              title: info.event.title,
+              start: info.event.start,
+              end: info.event.end,
+              color: events.find((event) => event.id === info.event.id)?.color || defaultColor,
+            })
+          }
+          headerToolbar={{
+            left: "prev,today,next",
+            center: "title",
+            right: "addEvent dayGridMonth,timeGridWeek,timeGridDay",
+          }}
+          buttons={{
+            addEvent: {
+              text: "Add Event",
+              click: () => openModal(getLocalDate()),
+            },
+          }}
+          events={events.map((event) => ({
+            id: event.id,
+            title: event.title,
+            start: event.start,
+            end: event.end,
+            backgroundColor: event.color,
+            borderColor: event.color,
+            textColor: "#1e293b",
+          }))}
+        />
+      </section>
 
       {isOpen && (
         <EventModal
@@ -183,6 +206,6 @@ export default function Calendar() {
           isEditing={editingEventId !== null}
         />
       )}
-    </>
+    </main>
   );
 }

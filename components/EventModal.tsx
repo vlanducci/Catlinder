@@ -2,10 +2,10 @@
 "use client";
 
 const eventColors = [
-  { name: "Red", value: "#f87171", variable: "--event-color-01" },
-  { name: "Yellow", value: "#fbbf24", variable: "--event-color-02" },
-  { name: "Green", value: "#34d399", variable: "--event-color-03" },
-  { name: "Blue", value: "#60a5fa", variable: "--event-color-04" },
+  { name: "Red", value: "--event-color-01" },
+  { name: "Yellow", value: "--event-color-02" },
+  { name: "Green", value: "--event-color-03" },
+  { name: "Blue", value: "--event-color-04" },
 ];
 
 type EventModalProps = {
@@ -147,7 +147,7 @@ export default function EventModal({
                     : "hover:scale-110"
                 }`}
                 style={{
-                  backgroundColor: `var(${eventColor.variable})`,
+                  backgroundColor: `var(${eventColor.value})`,
                 }}
               >
                 {color === eventColor.value && (
