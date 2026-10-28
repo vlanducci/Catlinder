@@ -1,12 +1,11 @@
 
 import CalendarLoader from "@/components/CalendarLoader";
-import ThemeToggle from "@/components/ThemeToggle";
+import { Suspense } from "react";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 
-async function HomePage() {
-  await connection();
+async function AuthenticatedHome() {
   const session = await auth();
 
   if (!session?.user) {
@@ -14,4 +13,12 @@ async function HomePage() {
   }
 
   return <CalendarLoader />;
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" />}>
+      <AuthenticatedHome />
+    </Suspense>
+  );
 }
