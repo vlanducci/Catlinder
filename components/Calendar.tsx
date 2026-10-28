@@ -81,48 +81,98 @@ export default function Calendar() {
     setIsOpen(true);
   };
 
-  const saveEvent = (e: React.FormEvent<HTMLFormElement>) => {
+  const saveEvent = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (endDate < selectedDate || (endDate === selectedDate && endTime <= startTime)) {
+    if (
+      !title.trim() ||
+      endDate < selectedDate ||
+      (endDate === selectedDate && endTime <= startTime)
+    ) {
       return;
     }
 
     const eventData = {
-      title,
-      start: `${selectedDate}T${startTime}:00`,
-      end: `${endDate}T${endTime}:00`,
+      title: title.trim(),
+      start: new Date(`${selectedDate}T${startTime}:00`).toISOString(),
+      end: new Date(`${endDate}T${endTime}:00`).toISOString(),
       color,
     };
 
-    if (editingEventId) {
-      setEvents((previous) =>
-        previous.map((event) =>
-          event.id === editingEventId ? { ...event, ...eventData } : event
-        )
+    try {
+      const response = await fetch(
+        editingEventId ? `/api/events/${editingEventId}` : "/api/events",
+        {
+          method: editingEventId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(eventData),
+        }
       );
-    } else {
-      setEvents((previous) => [
-        ...previous,
-        { id: crypto.randomUUID(), ...eventData },
-      ]);
-    }
 
-    setIsOpen(false);
+      if (!response.ok) {
+        throw new Error("Failed to save event");
+      }
+
+      const savedEvent: CalendarEvent = await response.json();
+
+      setEvents((previous) =>
+        editingEventId
+          ? previous.map((event) =>
+              event.id === editingEventId ? savedEvent : event
+            )
+          : [...previous, savedEvent]
+      );
+
+      setIsOpen(false);
+    } catch (error) {
+      console.error("Error saving event:", error);
+      alert("Could not save the event. Please try again.");
+    }
   };
 
-  const deleteEvent = () => {
+  const deleteEvent = async () => {
     if (!editingEventId) return;
 
-    setEvents((previous) =>
-      previous.filter((event) => event.id !== editingEventId)
-    );
-    setIsOpen(false);
+    try {
+      const response = await fetch(`/api/events/${editingEventId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to delete event");
+      }
+
+      setEvents((previous) =>
+        previous.filter((event) => event.id !== editingEventId)
+      );
+
+      setIsOpen(false);
+    } catch (error) {
+      console.error("Error deleting event:", error);
+      alert("Could not delete the event. Please try again.");
+    }
   };
 
   useEffect(() => {
     setIsMounted(true);
     setToday(getLocalDate());
+
+    const loadEvents = async () => {
+      try {
+        const response = await fetch("/api/events");
+
+        if (!response.ok) {
+          throw new Error("Failed to load events");
+        }
+
+        const savedEvents: CalendarEvent[] = await response.json();
+        setEvents(savedEvents);
+      } catch (error) {
+        console.error("Error loading events:", error);
+      }
+    };
+
+    loadEvents();
   }, []);
 
   return (
