@@ -14,7 +14,9 @@ type EventModalProps = {
   startTime: string;
   endTime: string;
   color: string;
+  endDate: string;
   setSelectedDate: (value: string) => void;
+  setEndDate: (value: string) => void;
   setTitle: (value: string) => void;
   setStartTime: (value: string) => void;
   setEndTime: (value: string) => void;
@@ -27,11 +29,13 @@ type EventModalProps = {
 
 export default function EventModal({
   selectedDate,
+  endDate,
   title,
   startTime,
   endTime,
   color,
   setSelectedDate,
+  setEndDate,
   setTitle,
   setStartTime,
   setEndTime,
@@ -89,6 +93,17 @@ export default function EventModal({
             className={inputClass}
           />
         </label>
+
+        <label className="block space-y-1">
+          <span className="text-sm font-medium">End date</span>
+          <input
+            required
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className={inputClass}
+          />
+        </label> 
 
         <div className="grid grid-cols-2 gap-3">
           <label className="block space-y-1">

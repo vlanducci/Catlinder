@@ -24,6 +24,7 @@ type CalendarEvent = {
 export default function Calendar() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [selectedDate, setSelectedDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [title, setTitle] = useState("");
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("10:00");
@@ -41,6 +42,7 @@ export default function Calendar() {
 
   const openModal = (date: string) => {
     setSelectedDate(date.slice(0, 10));
+    setEndDate(date.slice(0, 10));
     setTitle("");
     setStartTime("09:00");
     setEndTime("10:00");
@@ -81,7 +83,7 @@ export default function Calendar() {
     const eventData = {
       title,
       start: `${selectedDate}T${startTime}:00`,
-      end: `${selectedDate}T${endTime}:00`,
+      end: `${endDate}T${endTime}:00`,
       color,
     };
 
@@ -157,11 +159,13 @@ export default function Calendar() {
       {isOpen && (
         <EventModal
           selectedDate={selectedDate}
+          endDate={endDate}
           title={title}
           startTime={startTime}
           endTime={endTime}
           color={color}
           setSelectedDate={setSelectedDate}
+          setEndDate={setEndDate}
           setTitle={setTitle}
           setStartTime={setStartTime}
           setEndTime={setEndTime}
