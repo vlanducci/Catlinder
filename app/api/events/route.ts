@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     const color =
       typeof body.color === "string" && body.color.trim()
         ? body.color.trim()
-        : "#60a5fa";
+        : "var(--event-color-04)";
     const allDay = body.allDay === true;
 
     const errors: string[] = [];

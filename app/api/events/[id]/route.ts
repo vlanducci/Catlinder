@@ -2,7 +2,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import Color from "color";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -27,7 +26,7 @@ export async function PATCH(request: Request, { params }: Context) {
     const color =
       typeof body.color === "string" && body.color.trim()
         ? body.color.trim()
-        : "#60a5fa";
+        : "var(--event-color-04)";
 
     const errors: string[] = [];
 

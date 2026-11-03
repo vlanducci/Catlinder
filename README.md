@@ -32,5 +32,19 @@ npx prisma validate
 npx prisma generate
 npx prisma db push
 
+## Outlook calendar accounts
+
+The Microsoft Entra app must allow the account types you want to connect and
+include these Web redirect URIs in its Authentication settings:
+
+- `http://localhost:3000/api/outlook/callback` for local development
+- `https://<your-domain>/api/outlook/callback` for production
+- `http://localhost:3000/api/google/callback` for local development
+- `https://<your-domain>/api/google/callback` for production
+
+Users can connect additional Microsoft accounts from the calendar menu. Each
+account must grant calendar and shared-calendar access when prompted. Existing
+accounts should be reconnected after shared-calendar permissions are added.
+
 ## Vercel 
 https://catlinder.vercel.app/

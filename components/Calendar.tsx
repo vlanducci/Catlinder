@@ -10,27 +10,55 @@ import interactionPlugin from "@fullcalendar/react/interaction";
 import themePlugin from "@fullcalendar/react/themes/pulse";
 import "@fullcalendar/react/skeleton.css";
 import "@fullcalendar/react/themes/pulse/theme.css";
-import EventModal, { eventColors } from "./EventModal";
+import CalendarMenu, { type CalendarOption } from "./CalendarMenu";
+import EventModal, { eventColorVariables } from "./EventModal";
 import ThemeToggle from "./ThemeToggle";
 import { signOut } from "next-auth/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-const defaultEventColor = eventColors[0].value;
+const defaultEventColor = `var(${eventColorVariables[0]})`;
 
 // Defines the structure of a calendar event returned by the API.
 type CalendarEvent = {
   id: string;
+  calendarId?: string;
   title: string;
   start: string;
   end: string;
   color: string;
+  allDay?: boolean;
+  provider?: "google" | "outlook";
 };
 
-const normalizeEventColor = (color: string) =>
-  eventColors.find((eventColor) => eventColor.cssVariable === color)?.value ??
-  color;
+
+const normalizeEventColor = (color: string) => {
+  const normalizedColor = color.trim().toLowerCase();
+  const colorVariable = eventColorVariables.find((variable) => {
+    const cssColor = getComputedStyle(document.documentElement)
+      .getPropertyValue(variable)
+      .trim()
+      .toLowerCase();
+
+    return (
+      normalizedColor === variable.toLowerCase() ||
+      normalizedColor === `var(${variable})` ||
+      normalizedColor === cssColor
+    );
+  });
+
+  return colorVariable ? `var(${colorVariable})` : color;
+};
 
 export default function Calendar() {
+  const [outlookEvents, setOutlookEvents] = useState<CalendarEvent[]>([]);
+  const [outlookCalendars, setOutlookCalendars] = useState<CalendarOption[]>([]);
+  const [selectedCalendarIds, setSelectedCalendarIds] = useState<string[]>([]);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [connectionMessage, setConnectionMessage] = useState<string | null>(
+    null
+  );
+  const outlookRequestId = useRef(0);
+  const calendarSelectionInitialized = useRef(false);
   const [events, setEvents] = useState<CalendarEvent[]>([]);  // Stores the list of events fetched from the API.
   const [selectedDate, setSelectedDate] = useState("");  // Stores the date selected by the user for creating or editing an event.
   const [endDate, setEndDate] = useState("");  // Stores the end date for the event being created or edited.
@@ -50,6 +78,205 @@ export default function Calendar() {
 
     return `${year}-${month}-${day}`;
   };
+
+  const loadExternalCalendarEvents = async (start: Date, end: Date) => {
+    const requestId = ++outlookRequestId.current;
+
+    try {
+      const range =
+        `start=${encodeURIComponent(start.toISOString())}` +
+        `&end=${encodeURIComponent(end.toISOString())}`;
+      const fetchSource = async (provider: "outlook" | "google") => {
+        const response = await fetch(`/api/${provider}/events?${range}`);
+        if (!response.ok) {
+          const error: { error?: string } = await response.json();
+          throw new Error(
+            error.error ||
+              `Failed to load ${provider} calendars (${response.status})`
+          );
+        }
+
+        const data: {
+          calendars: CalendarOption[];
+          events: CalendarEvent[];
+          errors?: { accountName: string; message: string }[];
+        } = await response.json();
+
+        if (!Array.isArray(data.calendars) || !Array.isArray(data.events)) {
+          throw new Error(`${provider} returned an invalid events response`);
+        }
+
+        return data;
+      };
+
+      const [outlookResult, googleResult] = await Promise.allSettled([
+        fetchSource("outlook"),
+        fetchSource("google"),
+      ]);
+      const outlookData =
+        outlookResult.status === "fulfilled" ? outlookResult.value : null;
+      const googleData =
+        googleResult.status === "fulfilled" ? googleResult.value : null;
+      const calendars = [
+        ...(outlookData?.calendars ?? []),
+        ...(googleData?.calendars ?? []),
+      ];
+      const externalEvents = [
+        ...(outlookData?.events ?? []),
+        ...(googleData?.events ?? []),
+      ];
+      const errors = [
+        ...(outlookData?.errors ?? []),
+        ...(googleData?.errors ?? []),
+        ...(outlookResult.status === "rejected"
+          ? [
+              {
+                accountName: "Outlook",
+                message:
+                  outlookResult.reason instanceof Error
+                    ? outlookResult.reason.message
+                    : "Unable to load Outlook calendars",
+              },
+            ]
+          : []),
+        ...(googleResult.status === "rejected"
+          ? [
+              {
+                accountName: "Google",
+                message:
+                  googleResult.reason instanceof Error
+                    ? googleResult.reason.message
+                    : "Unable to load Google calendars",
+              },
+            ]
+          : []),
+      ];
+
+      if (!outlookData && !googleData) {
+        throw new Error(errors.map(({ accountName, message }) =>
+          `${accountName}: ${message}`
+        ).join("; "));
+      }
+
+      if (requestId === outlookRequestId.current) {
+        setOutlookCalendars(calendars);
+        setOutlookEvents(externalEvents);
+        setCalendarError(
+          errors.length > 0
+            ? errors
+                .map(({ accountName, message }) => `${accountName}: ${message}`)
+                .join("; ")
+            : null
+        );
+
+        if (!calendarSelectionInitialized.current) {
+          const storedSelection = localStorage.getItem(
+            "catlinder-outlook-calendars"
+          );
+          const query = new URLSearchParams(window.location.search);
+          const connectedProvider =
+            query.get("google") === "connected"
+              ? "google"
+              : query.get("outlook") === "connected"
+                ? "outlook"
+                : null;
+          const connectionFailed =
+            query.get("google") === "error" || query.get("outlook") === "error";
+          let selectedIds = calendars.map((calendar) => calendar.id);
+
+          if (storedSelection !== null) {
+            try {
+              const parsedSelection: unknown = JSON.parse(storedSelection);
+              if (
+                Array.isArray(parsedSelection) &&
+                parsedSelection.every((id): id is string => typeof id === "string")
+              ) {
+                selectedIds = parsedSelection.filter((id) =>
+                  calendars.some((calendar) => calendar.id === id)
+                );
+                const legacyCalendarIds = new Set(
+                  parsedSelection.map((id) => id.split(":").at(-1))
+                );
+                selectedIds = [
+                  ...selectedIds,
+                  ...calendars
+                    .filter(
+                      (calendar) =>
+                        calendar.provider === "outlook" &&
+                        legacyCalendarIds.has(calendar.id.split(":").at(-1)) &&
+                        !selectedIds.includes(calendar.id)
+                    )
+                    .map((calendar) => calendar.id),
+                ];
+              }
+            } catch (error) {
+              console.error("Unable to read saved calendar selection:", error);
+            }
+          }
+
+          if (connectedProvider) {
+            selectedIds = [
+              ...selectedIds,
+              ...calendars
+                .filter(
+                  (calendar) =>
+                    calendar.provider === connectedProvider &&
+                    !selectedIds.includes(calendar.id)
+                )
+                .map((calendar) => calendar.id),
+            ];
+            setConnectionMessage(
+              `${connectedProvider === "google" ? "Google" : "Microsoft"} account connected.`
+            );
+          } else if (connectionFailed) {
+            setConnectionMessage(
+              "Could not connect the account. Please try again and approve calendar access."
+            );
+          }
+
+          calendarSelectionInitialized.current = true;
+          setSelectedCalendarIds(selectedIds);
+          if (connectedProvider || connectionFailed) {
+            window.history.replaceState(
+              window.history.state,
+              "",
+              window.location.pathname
+            );
+          }
+        }
+      }
+    } catch (error) {
+      if (requestId === outlookRequestId.current) {
+        setOutlookEvents([]);
+        setCalendarError(
+          error instanceof Error ? error.message : "Unable to load Outlook events"
+        );
+      }
+
+      throw error;
+    }
+  };
+
+  useEffect(() => {
+    if (calendarSelectionInitialized.current) {
+      localStorage.setItem(
+        "catlinder-outlook-calendars",
+        JSON.stringify(selectedCalendarIds)
+      );
+    }
+  }, [selectedCalendarIds]);
+
+  const toggleCalendar = (calendarId: string) => {
+    setSelectedCalendarIds((selectedIds) =>
+      selectedIds.includes(calendarId)
+        ? selectedIds.filter((id) => id !== calendarId)
+        : [...selectedIds, calendarId]
+    );
+  };
+
+  const visibleExternalEvents = outlookEvents.filter((event) =>
+    selectedCalendarIds.includes(event.calendarId ?? "")
+  );
 
   // Opens the event modal for creating a new event, pre-filling the date and resetting other fields.
   const openModal = (date: string) => {
@@ -209,6 +436,17 @@ export default function Calendar() {
         <h1 className="text-2xl font-semibold tracking-tight">Catlinder</h1>
 
         <div className="flex items-center gap-3">
+          <CalendarMenu
+            calendars={outlookCalendars}
+            selectedCalendarIds={selectedCalendarIds}
+            onToggleCalendar={toggleCalendar}
+            onSelectAll={() =>
+              setSelectedCalendarIds(
+                outlookCalendars.map((calendar) => calendar.id)
+              )
+            }
+            onClearAll={() => setSelectedCalendarIds([])}
+          />
           <ThemeToggle />
           <button
             type="button"
@@ -221,6 +459,31 @@ export default function Calendar() {
       </header>
 
       <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 sm:p-5">
+        {connectionMessage && (
+          <p className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm">
+            {connectionMessage}
+          </p>
+        )}
+        {calendarError && (
+          <p role="alert" className="mb-3 rounded-lg border border-red-400/50 bg-red-500/10 p-3 text-sm text-red-500">
+            Calendar events could not be loaded: {calendarError}
+          </p>
+        )}
+        {!calendarError &&
+          outlookCalendars.length > 0 &&
+          selectedCalendarIds.length === 0 && (
+            <p className="mb-3 rounded-lg bg-[var(--surface)] p-3 text-sm text-[var(--muted)]">
+              No Outlook calendars are selected. Choose calendars from the
+              Calendars menu to display their events.
+            </p>
+          )}
+        {!calendarError &&
+          selectedCalendarIds.length > 0 &&
+          visibleExternalEvents.length === 0 && (
+            <p className="mb-3 rounded-lg bg-[var(--surface)] p-3 text-sm text-[var(--muted)]">
+              No events in this date range for the selected calendars.
+            </p>
+          )}
         <FullCalendar
           plugins={[
             themePlugin,
@@ -233,12 +496,24 @@ export default function Calendar() {
           eventDisplay="block"
           dateClick={(info) => openModal(info.dateStr)}
           eventClick={(info) => {
+            if (
+              info.event.id.startsWith("outlook-") ||
+              info.event.id.startsWith("google-")
+            ) {
+              return;
+            }
+
             editEvent({
               id: info.event.id,
               title: info.event.title,
               start: info.event.start,
               end: info.event.end,
             });
+          }}
+          datesSet={(info) => {
+            loadExternalCalendarEvents(info.start, info.end).catch(
+              console.error
+            );
           }}
           headerToolbar={{
             left: "prev,today,next",
@@ -251,13 +526,30 @@ export default function Calendar() {
               click: () => openModal(getLocalDate()),
             },
           }}
-          events={events.map((event) => ({
-            id: event.id,
-            title: event.title,
-            start: event.start,
-            end: event.end,
-            color: normalizeEventColor(event.color),
-          }))}
+          events={[
+            ...events.map((event) => ({
+              id: event.id,
+              title: event.title,
+              start: event.start,
+              end: event.end,
+              allDay: event.allDay,
+              color: normalizeEventColor(event.color),
+              backgroundColor: normalizeEventColor(event.color),
+              borderColor: normalizeEventColor(event.color),
+              textColor: "var(--event-text-color)",
+            })),
+            ...visibleExternalEvents.map((event) => ({
+                id: `outlook-${event.id}`,
+                title: event.title,
+                start: event.start,
+                end: event.end,
+                allDay: event.allDay,
+                color: event.color,
+                backgroundColor: event.color,
+                borderColor: event.color,
+                textColor: "var(--event-text-color)",
+              })),
+          ]}
         />
       </section>
 

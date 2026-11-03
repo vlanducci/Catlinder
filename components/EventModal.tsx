@@ -1,11 +1,10 @@
 "use client";
 
-
-export const eventColors = [
-  { value: "#f87171", cssVariable: "--event-color-01" },
-  { value: "#fbbf24", cssVariable: "--event-color-02" },
-  { value: "#34d399", cssVariable: "--event-color-03" },
-  { value: "#60a5fa", cssVariable: "--event-color-04" },
+export const eventColorVariables = [
+  "--event-color-01",
+  "--event-color-02",
+  "--event-color-03",
+  "--event-color-04",
 ];
 
 type EventModalProps = {
@@ -135,21 +134,21 @@ export default function EventModal({
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium">Event colour</legend>
           <div className="flex items-center gap-3">
-            {eventColors.map((eventColor) => (
+            {eventColorVariables.map((eventColor, index) => (
               <button
-                key={eventColor.value}
+                key={eventColor}
                 type="button"
-                aria-label={`Use ${eventColor.value} event colour`}
-                aria-pressed={color === eventColor.value}
-                onClick={() => setColor(eventColor.value)}
+                aria-label={`Use event colour ${index + 1}`}
+                aria-pressed={color === `var(${eventColor})`}
+                onClick={() => setColor(`var(${eventColor})`)}
                 className={`flex h-9 w-9 items-center justify-center rounded-full transition ${
-                  color === eventColor.value
+                  color === `var(${eventColor})`
                     ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--surface)]"
                     : "hover:scale-110"
                 }`}
-                style={{ backgroundColor: eventColor.value }}
+                style={{ backgroundColor: `var(${eventColor})` }}
               >
-                {color === eventColor.value && (
+                {color === `var(${eventColor})` && (
                   <span className="font-bold text-slate-900">✓</span>
                 )}
               </button>
