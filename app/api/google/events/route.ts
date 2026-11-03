@@ -1,3 +1,4 @@
+// Google Calendar event API: creates, lists, updates, and deletes events for linked accounts.
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
@@ -7,6 +8,7 @@ import {
 
 type CreateEventBody = {
   calendarId?: unknown;
+  eventId?: unknown;
   title?: unknown;
   start?: unknown;
   end?: unknown;
@@ -85,6 +87,7 @@ export async function POST(request: Request) {
         provider: "google",
       },
     });
+    // Never use a provider event ID until its linked account is confirmed to belong to this user.
     if (!account) {
       return Response.json({ error: "Google account not found" }, { status: 404 });
     }
@@ -101,6 +104,7 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             summary: title,
+            // Google represents all-day events with date-only values and an exclusive end date.
             start: allDay
               ? { date: start.toISOString().slice(0, 10) }
               : { dateTime: start.toISOString() },
@@ -149,9 +153,10 @@ export async function POST(request: Request) {
       {
         id: `google-${account.id}-${googleCalendarId}-${createdEvent.id}`,
         calendarId: body.calendarId,
-        title: createdEvent.summary || title,
-        start: eventStart,
-        end: eventEnd,
+      externalEventId: createdEvent.id,
+      title: createdEvent.summary || title,
+      start: eventStart,
+      end: eventEnd,
         allDay: Boolean(createdEvent.start?.date),
         color: "var(--event-color-google)",
         provider: "google",
@@ -166,6 +171,239 @@ export async function POST(request: Request) {
           error instanceof Error
             ? error.message
             : "Unable to create Google Calendar event",
+      },
+      {
+        status:
+          error instanceof GoogleCalendarError ||
+          error instanceof CalendarTokenError
+            ? error.status
+            : 500,
+      }
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return Response.json({ error: "Unauthorised" }, { status: 401 });
+  }
+
+  try {
+    const body: CreateEventBody = await request.json();
+    if (
+      typeof body.calendarId !== "string" ||
+      typeof body.eventId !== "string" ||
+      typeof body.title !== "string" ||
+      typeof body.start !== "string" ||
+      typeof body.end !== "string"
+    ) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const [accountId, ...calendarIdParts] = body.calendarId.split(":");
+    const googleCalendarId = calendarIdParts.join(":");
+    const eventId = body.eventId.trim();
+    const title = body.title.trim();
+    const startValue = body.start;
+    const endValue = body.end;
+    const start = new Date(startValue);
+    const end = new Date(endValue);
+    const allDay = body.allDay === true;
+
+    if (
+      !accountId ||
+      !googleCalendarId ||
+      !eventId ||
+      eventId.length > 1024 ||
+      !title ||
+      title.length > 200 ||
+      !Number.isFinite(start.getTime()) ||
+      !Number.isFinite(end.getTime()) ||
+      end <= start
+    ) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const account = await prisma.account.findFirst({
+      where: {
+        id: accountId,
+        userId: session.user.id,
+        provider: "google",
+      },
+    });
+    if (!account) {
+      return Response.json({ error: "Google account not found" }, { status: 404 });
+    }
+
+    // Keep provider requests inside the authenticated account and selected calendar.
+    const updateGoogleEvent = async (token: string) => {
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(googleCalendarId)}/events/${encodeURIComponent(eventId)}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            summary: title,
+            start: allDay
+              ? { date: startValue.slice(0, 10) }
+              : { dateTime: start.toISOString() },
+            end: allDay
+              ? { date: endValue.slice(0, 10) }
+              : { dateTime: end.toISOString() },
+          }),
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        throw new GoogleCalendarError(
+          response.status,
+          `Unable to update Google Calendar event (${response.status}): ${await response.text()}`
+        );
+      }
+
+      return response.json() as Promise<GoogleEvent>;
+    };
+
+    let updatedEvent: GoogleEvent;
+    try {
+      updatedEvent = await updateGoogleEvent(
+        await getCalendarAccessToken(account, "google")
+      );
+    } catch (error) {
+      if (
+        !(
+          error instanceof GoogleCalendarError ||
+          error instanceof CalendarTokenError
+        ) ||
+        error.status !== 401
+      ) {
+        throw error;
+      }
+      updatedEvent = await updateGoogleEvent(
+        await getCalendarAccessToken(account, "google", true)
+      );
+    }
+
+    const eventStart = updatedEvent.start?.dateTime ?? updatedEvent.start?.date;
+    const eventEnd = updatedEvent.end?.dateTime ?? updatedEvent.end?.date;
+    if (!eventStart || !eventEnd) {
+      throw new Error("Google updated the event but returned incomplete details");
+    }
+
+    return Response.json({
+      id: `google-${account.id}-${googleCalendarId}-${updatedEvent.id || eventId}`,
+      calendarId: body.calendarId,
+      externalEventId: updatedEvent.id || eventId,
+      title: updatedEvent.summary || title,
+      start: eventStart,
+      end: eventEnd,
+      allDay: Boolean(updatedEvent.start?.date),
+      color: "var(--event-color-google)",
+      provider: "google",
+    });
+  } catch (error) {
+    console.error("Unable to update Google Calendar event:", error);
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to update Google Calendar event",
+      },
+      {
+        status:
+          error instanceof GoogleCalendarError ||
+          error instanceof CalendarTokenError
+            ? error.status
+            : 500,
+      }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return Response.json({ error: "Unauthorised" }, { status: 401 });
+  }
+
+  try {
+    const body: CreateEventBody = await request.json();
+    if (
+      typeof body.calendarId !== "string" ||
+      typeof body.eventId !== "string"
+    ) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const [accountId, ...calendarIdParts] = body.calendarId.split(":");
+    const googleCalendarId = calendarIdParts.join(":");
+    const eventId = body.eventId.trim();
+    if (!accountId || !googleCalendarId || !eventId || eventId.length > 1024) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const account = await prisma.account.findFirst({
+      where: {
+        id: accountId,
+        userId: session.user.id,
+        provider: "google",
+      },
+    });
+    if (!account) {
+      return Response.json({ error: "Google account not found" }, { status: 404 });
+    }
+
+    // Delete uses the same account ownership check as updates before contacting Google.
+    const deleteGoogleEvent = async (token: string) => {
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(googleCalendarId)}/events/${encodeURIComponent(eventId)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        throw new GoogleCalendarError(
+          response.status,
+          `Unable to delete Google Calendar event (${response.status}): ${await response.text()}`
+        );
+      }
+    };
+
+    try {
+      await deleteGoogleEvent(await getCalendarAccessToken(account, "google"));
+    } catch (error) {
+      if (
+        !(
+          error instanceof GoogleCalendarError ||
+          error instanceof CalendarTokenError
+        ) ||
+        error.status !== 401
+      ) {
+        throw error;
+      }
+      await deleteGoogleEvent(
+        await getCalendarAccessToken(account, "google", true)
+      );
+    }
+
+    return new Response(null, { status: 204 });
+  } catch (error) {
+    console.error("Unable to delete Google Calendar event:", error);
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to delete Google Calendar event",
       },
       {
         status:
@@ -245,6 +483,7 @@ export async function GET(request: Request) {
   const events: {
     id: string;
     calendarId: string;
+    externalEventId: string;
     title: string;
     start: string;
     end: string;
@@ -325,6 +564,7 @@ export async function GET(request: Request) {
           accountEvents.push({
             id: `google-${account.id}-${calendar.id}-${event.id}`,
             calendarId,
+            externalEventId: event.id,
             title: event.summary || "Untitled event",
             start: eventStart,
             end: eventEnd,

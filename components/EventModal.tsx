@@ -1,5 +1,6 @@
 "use client";
 
+// Shared event form for creating and editing local or connected-calendar events.
 export const eventColorVariables = [
   "--event-color-01",
   "--event-color-02",
@@ -21,6 +22,8 @@ type EventModalProps = {
   startTime: string;
   endTime: string;
   color: string;
+  isAllDay: boolean;
+  isExternalEventEditing: boolean;
   endDate: string;
   setSelectedDate: (value: string) => void;
   setEndDate: (value: string) => void;
@@ -28,6 +31,7 @@ type EventModalProps = {
   setStartTime: (value: string) => void;
   setEndTime: (value: string) => void;
   setColor: (value: string) => void;
+  setIsAllDay: (value: boolean) => void;
   onClose: () => void;
   onSave: (e: React.FormEvent<HTMLFormElement>) => void;
   onDelete: () => void;
@@ -44,18 +48,19 @@ export default function EventModal({
   startTime,
   endTime,
   color,
+  isAllDay,
+  isExternalEventEditing,
   setSelectedDate,
   setEndDate,
   setTitle,
   setStartTime,
   setEndTime,
   setColor,
+  setIsAllDay,
   onClose,
   onSave,
   onDelete,
   isEditing,
-
-  // Destructures the props passed to the EventModal component, which include the event details, state setters, and callback functions for closing, saving, and deleting the event.
 }: EventModalProps) {
   const inputClass =
     "w-full rounded-lg border border-[var(--border)] bg-[var(--background)] p-2 text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]";
@@ -115,6 +120,17 @@ export default function EventModal({
           </label>
         )}
 
+        {/* All-day events use date-only values and do not require time fields. */}
+        <label className="flex items-center gap-2 text-sm font-medium">
+          <input
+            type="checkbox"
+            checked={isAllDay}
+            onChange={(event) => setIsAllDay(event.target.checked)}
+            className="accent-[var(--accent)]"
+          />
+          All-day event
+        </label>
+
         <label className="block space-y-1">
           <span className="text-sm font-medium">Date</span>
           <input
@@ -128,6 +144,11 @@ export default function EventModal({
 
         <label className="block space-y-1">
           <span className="text-sm font-medium">End date</span>
+          {isAllDay && (
+            <span className="block text-xs text-[var(--muted)]">
+              All-day event end dates are exclusive.
+            </span>
+          )}
           <input
             required
             type="date"
@@ -137,32 +158,35 @@ export default function EventModal({
           />
         </label>
 
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block space-y-1">
-            <span className="text-sm font-medium">Start time</span>
-            <input
-              required
-              type="time"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              className={inputClass}
-            />
-          </label>
+        {!isAllDay && (
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block space-y-1">
+              <span className="text-sm font-medium">Start time</span>
+              <input
+                required
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                className={inputClass}
+              />
+            </label>
 
-          <label className="block space-y-1">
-            <span className="text-sm font-medium">End time</span>
-            <input
-              required
-              type="time"
-              min={startTime}
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-              className={inputClass}
-            />
-          </label>
-        </div>
+            <label className="block space-y-1">
+              <span className="text-sm font-medium">End time</span>
+              <input
+                required
+                type="time"
+                min={startTime}
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                className={inputClass}
+              />
+            </label>
+          </div>
+        )}
 
-        {(!destinationCalendarId || isEditing) && (
+        {/* External providers own event colours, so only local events expose this picker. */}
+        {!isExternalEventEditing && (!destinationCalendarId || isEditing) && (
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">Event colour</legend>
             <div className="flex items-center gap-3">

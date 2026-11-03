@@ -1,3 +1,4 @@
+// Outlook event API: creates, lists, updates, and deletes events for linked Microsoft accounts.
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
@@ -7,6 +8,7 @@ import {
 
 type CreateEventBody = {
   calendarId?: unknown;
+  eventId?: unknown;
   title?: unknown;
   start?: unknown;
   end?: unknown;
@@ -100,6 +102,7 @@ export async function POST(request: Request) {
         provider: "microsoft-entra-id",
       },
     });
+    // The calendar reference identifies the account, so ownership is checked before calling Graph.
     if (!account) {
       return Response.json({ error: "Outlook account not found" }, { status: 404 });
     }
@@ -166,6 +169,7 @@ export async function POST(request: Request) {
       {
         id: `outlook-${account.id}-${graphCalendarId}-${createdEvent.id}`,
         calendarId: body.calendarId,
+        externalEventId: createdEvent.id,
         title: createdEvent.subject || title,
         start: createdEvent.isAllDay
           ? createdEvent.start.dateTime.slice(0, 10)
@@ -187,6 +191,247 @@ export async function POST(request: Request) {
           error instanceof Error
             ? error.message
             : "Unable to create Outlook event",
+      },
+      {
+        status:
+          error instanceof MicrosoftGraphError ||
+          error instanceof CalendarTokenError
+            ? error.status
+            : 500,
+      }
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return Response.json({ error: "Unauthorised" }, { status: 401 });
+  }
+
+  try {
+    const body: CreateEventBody = await request.json();
+    if (
+      typeof body.calendarId !== "string" ||
+      typeof body.eventId !== "string" ||
+      typeof body.title !== "string" ||
+      typeof body.start !== "string" ||
+      typeof body.end !== "string"
+    ) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const [accountId, ...calendarIdParts] = body.calendarId.split(":");
+    const graphCalendarId = calendarIdParts.join(":");
+    const eventId = body.eventId.trim();
+    const title = body.title.trim();
+    const startValue = body.start;
+    const endValue = body.end;
+    const start = new Date(startValue);
+    const end = new Date(endValue);
+    const allDay = body.allDay === true;
+
+    if (
+      !accountId ||
+      !graphCalendarId ||
+      !eventId ||
+      eventId.length > 1024 ||
+      !title ||
+      title.length > 200 ||
+      !Number.isFinite(start.getTime()) ||
+      !Number.isFinite(end.getTime()) ||
+      end <= start
+    ) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const account = await prisma.account.findFirst({
+      where: {
+        id: accountId,
+        userId: session.user.id,
+        provider: "microsoft-entra-id",
+      },
+    });
+    if (!account) {
+      return Response.json({ error: "Outlook account not found" }, { status: 404 });
+    }
+
+    // Keep provider requests inside the authenticated account and selected calendar.
+    const updateGraphEvent = async (token: string) => {
+      const response = await fetch(
+        `https://graph.microsoft.com/v1.0/me/calendars/${encodeURIComponent(graphCalendarId)}/events/${encodeURIComponent(eventId)}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Prefer: 'outlook.timezone="UTC"',
+          },
+          body: JSON.stringify({
+            subject: title,
+            start: {
+              dateTime: allDay
+                ? `${startValue.slice(0, 10)}T00:00:00`
+                : start.toISOString().slice(0, 19),
+              timeZone: "UTC",
+            },
+            end: {
+              dateTime: allDay
+                ? `${endValue.slice(0, 10)}T00:00:00`
+                : end.toISOString().slice(0, 19),
+              timeZone: "UTC",
+            },
+            isAllDay: allDay,
+          }),
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        throw new MicrosoftGraphError(
+          response.status,
+          `Unable to update Outlook event (${response.status}): ${await response.text()}`
+        );
+      }
+
+      return response.json() as Promise<MicrosoftEvent>;
+    };
+
+    let updatedEvent: MicrosoftEvent;
+    try {
+      updatedEvent = await updateGraphEvent(
+        await getCalendarAccessToken(account, "outlook")
+      );
+    } catch (error) {
+      if (
+        !(
+          error instanceof MicrosoftGraphError ||
+          error instanceof CalendarTokenError
+        ) ||
+        error.status !== 401
+      ) {
+        throw error;
+      }
+      updatedEvent = await updateGraphEvent(
+        await getCalendarAccessToken(account, "outlook", true)
+      );
+    }
+
+    return Response.json({
+      id: `outlook-${account.id}-${graphCalendarId}-${updatedEvent.id || eventId}`,
+      calendarId: body.calendarId,
+      externalEventId: updatedEvent.id || eventId,
+      title: updatedEvent.subject || title,
+      start: updatedEvent.isAllDay
+        ? updatedEvent.start.dateTime.slice(0, 10)
+        : formatDate(updatedEvent.start.dateTime),
+      end: updatedEvent.isAllDay
+        ? updatedEvent.end.dateTime.slice(0, 10)
+        : formatDate(updatedEvent.end.dateTime),
+      allDay: updatedEvent.isAllDay,
+      color: "var(--event-color-outlook)",
+      provider: "outlook",
+    });
+  } catch (error) {
+    console.error("Unable to update Outlook event:", error);
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to update Outlook event",
+      },
+      {
+        status:
+          error instanceof MicrosoftGraphError ||
+          error instanceof CalendarTokenError
+            ? error.status
+            : 500,
+      }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return Response.json({ error: "Unauthorised" }, { status: 401 });
+  }
+
+  try {
+    const body: CreateEventBody = await request.json();
+    if (
+      typeof body.calendarId !== "string" ||
+      typeof body.eventId !== "string"
+    ) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const [accountId, ...calendarIdParts] = body.calendarId.split(":");
+    const graphCalendarId = calendarIdParts.join(":");
+    const eventId = body.eventId.trim();
+    if (!accountId || !graphCalendarId || !eventId || eventId.length > 1024) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const account = await prisma.account.findFirst({
+      where: {
+        id: accountId,
+        userId: session.user.id,
+        provider: "microsoft-entra-id",
+      },
+    });
+    if (!account) {
+      return Response.json({ error: "Outlook account not found" }, { status: 404 });
+    }
+
+    // Delete uses the same account ownership check as updates before contacting Graph.
+    const deleteGraphEvent = async (token: string) => {
+      const response = await fetch(
+        `https://graph.microsoft.com/v1.0/me/calendars/${encodeURIComponent(graphCalendarId)}/events/${encodeURIComponent(eventId)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        throw new MicrosoftGraphError(
+          response.status,
+          `Unable to delete Outlook event (${response.status}): ${await response.text()}`
+        );
+      }
+    };
+
+    try {
+      await deleteGraphEvent(
+        await getCalendarAccessToken(account, "outlook")
+      );
+    } catch (error) {
+      if (
+        !(
+          error instanceof MicrosoftGraphError ||
+          error instanceof CalendarTokenError
+        ) ||
+        error.status !== 401
+      ) {
+        throw error;
+      }
+      await deleteGraphEvent(
+        await getCalendarAccessToken(account, "outlook", true)
+      );
+    }
+
+    return new Response(null, { status: 204 });
+  } catch (error) {
+    console.error("Unable to delete Outlook event:", error);
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to delete Outlook event",
       },
       {
         status:
@@ -260,6 +505,7 @@ export async function GET(request: Request) {
     const events: {
       id: string;
       calendarId: string;
+      externalEventId: string;
       title: string;
       start: string;
       end: string;
@@ -437,6 +683,7 @@ export async function GET(request: Request) {
                   .map((event) => ({
                     id: `outlook-${account.id}-${calendar.id}-${event.id}`,
                     calendarId,
+                    externalEventId: event.id,
                     title: event.subject || "Untitled event",
                     start: event.isAllDay
                       ? event.start.dateTime.slice(0, 10)

@@ -28,9 +28,11 @@ type CalendarEvent = {
   color: string;
   allDay?: boolean;
   provider?: "google" | "outlook";
+  // Provider IDs stay separate from the composite calendar event IDs used by FullCalendar.
+  externalEventId?: string;
 };
 
-
+// Defines the structure of a calendar option returned by the API, which includes the calendar's ID, name, account name, and provider type.
 const normalizeEventColor = (color: string) => {
   const normalizedColor = color.trim().toLowerCase();
   const colorVariable = eventColorVariables.find((variable) => {
@@ -49,6 +51,7 @@ const normalizeEventColor = (color: string) => {
   return colorVariable ? `var(${colorVariable})` : color;
 };
 
+// The Calendar component is the main interface for managing and displaying calendar events. It handles state management for events, calendars, and user interactions, including opening modals for creating or editing events, saving events to the backend, and deleting events. It also integrates with external calendar providers like Google and Outlook to fetch and display events from those sources.
 export default function Calendar() {
   const [outlookEvents, setOutlookEvents] = useState<CalendarEvent[]>([]);
   const [outlookCalendars, setOutlookCalendars] = useState<CalendarOption[]>([]);
@@ -69,6 +72,7 @@ export default function Calendar() {
   const [title, setTitle] = useState("");  // Stores the title of the event being created or edited.
   const [startTime, setStartTime] = useState("09:00");  // Stores the start time for the event being created or edited.
   const [endTime, setEndTime] = useState("10:00");  // Stores the end time for the event being created or edited.
+  const [isAllDay, setIsAllDay] = useState(false);
   const [color, setColor] = useState(defaultEventColor);  // Stores the colour for the event being created or edited.
   const [destinationCalendarId, setDestinationCalendarId] = useState("");
   const [editingEventId, setEditingEventId] = useState<string | null>(null);  // Stores the ID of the event currently being edited, or null if creating a new event.
@@ -366,10 +370,22 @@ export default function Calendar() {
     setTitle("");
     setStartTime("09:00");
     setEndTime("10:00");
+    setIsAllDay(false);
     setColor(defaultEventColor);
     setDestinationCalendarId("");
     setEditingEventId(null);
     setIsOpen(true);
+  };
+
+  const changeAllDay = (value: boolean) => {
+    setIsAllDay(value);
+    if (!value || endDate > selectedDate) return;
+
+    const nextDay = new Date(`${selectedDate}T00:00:00`);
+    nextDay.setDate(nextDay.getDate() + 1);
+    setEndDate(
+      `${nextDay.getFullYear()}-${String(nextDay.getMonth() + 1).padStart(2, "0")}-${String(nextDay.getDate()).padStart(2, "0")}`
+    );
   };
 
   // Prepares the event modal for editing an existing event.
@@ -384,21 +400,25 @@ export default function Calendar() {
     const pad = (value: number) => String(value).padStart(2, "0");
     const date = event.start;
     const end = event.end ?? new Date(date.getTime() + 60 * 60 * 1000);
+    const savedEvent = [...events, ...outlookEvents].find(
+      (item) => item.id === event.id
+    );
+    const dateValue = savedEvent?.allDay
+      ? savedEvent.start.slice(0, 10)
+      : `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    const endDateValue = savedEvent?.allDay
+      ? savedEvent.end.slice(0, 10)
+      : `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
 
     setEditingEventId(event.id);
     setDestinationCalendarId("");
     setTitle(event.title);
-    setSelectedDate(
-      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-    );
-    setEndDate(
-      `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`
-    );
+    setSelectedDate(dateValue);
+    setEndDate(endDateValue);
     setStartTime(`${pad(date.getHours())}:${pad(date.getMinutes())}`);
     setEndTime(`${pad(end.getHours())}:${pad(end.getMinutes())}`);
 
-    // Finds the saved event in the local state to retrieve its colour.
-    const savedEvent = events.find((item) => item.id === event.id);
+    setIsAllDay(savedEvent?.allDay ?? false);
     setColor(
       savedEvent
         ? normalizeEventColor(savedEvent.color)
@@ -415,28 +435,57 @@ export default function Calendar() {
     // Validates the input fields before proceeding with the save operation.
     if (
       !title.trim() ||
-      endDate < selectedDate ||
-      (endDate === selectedDate && endTime <= startTime)
+      (isAllDay && endDate <= selectedDate) ||
+      (!isAllDay &&
+        (endDate < selectedDate ||
+          (endDate === selectedDate && endTime <= startTime)))
     ) {
       return;
     }
 
+    const eventBeingEdited = editingEventId
+      ? [...events, ...outlookEvents].find(
+          (event) => event.id === editingEventId
+        )
+      : undefined;
+    const targetCalendarId =
+      eventBeingEdited?.calendarId ?? destinationCalendarId;
+    // Provider calendar IDs and event IDs are validated server-side against the signed-in user.
     const externalCalendar = outlookCalendars.find(
-      (calendar) => calendar.id === destinationCalendarId
+      (calendar) => calendar.id === targetCalendarId
     );
-    if (destinationCalendarId && !externalCalendar) {
+    if (targetCalendarId && !externalCalendar) {
       alert(
         "The selected calendar is no longer available. Refresh and try again."
       );
       return;
     }
+    if (
+      eventBeingEdited?.provider &&
+      (!eventBeingEdited.externalEventId || !externalCalendar)
+    ) {
+      alert("This external event cannot be edited because its calendar is unavailable.");
+      return;
+    }
 
     const eventData = {
       title: title.trim(),
-      start: new Date(`${selectedDate}T${startTime}:00`).toISOString(),
-      end: new Date(`${endDate}T${endTime}:00`).toISOString(),
+      start: isAllDay
+        ? selectedDate
+        : new Date(`${selectedDate}T${startTime}:00`).toISOString(),
+      end: isAllDay
+        ? endDate
+        : new Date(`${endDate}T${endTime}:00`).toISOString(),
+      allDay: isAllDay,
       color: normalizeEventColor(color),
-      ...(externalCalendar ? { calendarId: externalCalendar.id } : {}),
+      ...(externalCalendar
+        ? {
+            calendarId: externalCalendar.id,
+            ...(eventBeingEdited?.externalEventId
+              ? { eventId: eventBeingEdited.externalEventId }
+              : {}),
+          }
+        : {}),
     };
 
     try {
@@ -454,18 +503,21 @@ export default function Calendar() {
         }
       );
 
-      // Checks if the response from the server indicates a successful operation. If not, it logs the error and throws an exception.
       if (!response.ok) {
         const errorText = await response.text();
-        console.error("Save failed:", response.status, errorText);
         throw new Error(`Save failed (${response.status}): ${errorText}`);
       }
 
-      const savedEvent: CalendarEvent = await response.json();  // Parses the response from the server to get the saved event data.
+      const savedEvent: CalendarEvent = await response.json();
 
-      // Updates the local state with the newly saved event. If editing, it replaces the existing event; if creating, it adds the new event to the list.
       if (externalCalendar) {
-        setOutlookEvents((previous) => [...previous, savedEvent]);
+        setOutlookEvents((previous) =>
+          editingEventId
+            ? previous.map((event) =>
+                event.id === editingEventId ? savedEvent : event
+              )
+            : [...previous, savedEvent]
+        );
       } else {
         setEvents((previous) =>
           editingEventId
@@ -486,17 +538,32 @@ export default function Calendar() {
   const deleteEvent = async () => {
     if (!editingEventId) return;
 
+    const eventBeingEdited = [...events, ...outlookEvents].find(
+      (event) => event.id === editingEventId
+    );
+
     try {
-      const response = await fetch(`/api/events/${editingEventId}`, {
-        method: "DELETE",
-      });
+      const response = eventBeingEdited?.provider
+        ? await fetch(`/api/${eventBeingEdited.provider}/events`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              calendarId: eventBeingEdited.calendarId,
+              eventId: eventBeingEdited.externalEventId,
+            }),
+          })
+        : await fetch(`/api/events/${editingEventId}`, {
+            method: "DELETE",
+          });
 
       if (!response.ok) {
         throw new Error("Failed to delete event");
       }
 
-      // Updates the local state to remove the deleted event from the list of events.
       setEvents((previous) =>
+        previous.filter((event) => event.id !== editingEventId)
+      );
+      setOutlookEvents((previous) =>
         previous.filter((event) => event.id !== editingEventId)
       );
 
@@ -595,13 +662,6 @@ export default function Calendar() {
           eventDisplay="block"
           dateClick={(info) => openModal(info.dateStr)}
           eventClick={(info) => {
-            if (
-              info.event.id.startsWith("outlook-") ||
-              info.event.id.startsWith("google-")
-            ) {
-              return;
-            }
-
             editEvent({
               id: info.event.id,
               title: info.event.title,
@@ -674,6 +734,12 @@ export default function Calendar() {
           onClose={() => setIsOpen(false)}
           onSave={saveEvent}
           onDelete={deleteEvent}
+          isAllDay={isAllDay}
+          isExternalEventEditing={Boolean(
+            editingEventId &&
+              outlookEvents.some((event) => event.id === editingEventId)
+          )}
+          setIsAllDay={changeAllDay}
           isEditing={editingEventId !== null}
         />
       )}

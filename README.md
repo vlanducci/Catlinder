@@ -46,5 +46,8 @@ Users can connect additional Microsoft accounts from the calendar menu. Each
 account must grant calendar and shared-calendar access when prompted. Existing
 accounts should be reconnected after shared-calendar permissions are added.
 
+Events on connected Google and Outlook calendars can be edited or deleted from
+the calendar. The connected accounts must grant calendar write access.
+
 ## Vercel 
 https://catlinder.vercel.app/

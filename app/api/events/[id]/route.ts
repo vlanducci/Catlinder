@@ -1,4 +1,5 @@
 
+// Authenticated handlers for updating or deleting one of the user's Catlinder events.
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -27,6 +28,7 @@ export async function PATCH(request: Request, { params }: Context) {
       typeof body.color === "string" && body.color.trim()
         ? body.color.trim()
         : "var(--event-color-04)";
+    const allDay = body.allDay === true;
 
     const errors: string[] = [];
 
@@ -59,9 +61,10 @@ export async function PATCH(request: Request, { params }: Context) {
       );
     }
 
+    // Include the owner in the update filter so another user's event cannot be changed.
     const result = await prisma.event.updateMany({
       where: { id, userId },
-      data: { title, start, end, color },
+      data: { title, start, end, color, allDay },
     });
 
     if (result.count === 0) {
@@ -97,6 +100,7 @@ export async function DELETE(_request: Request, { params }: Context) {
   try {
     const { id } = await params;
 
+    // Delete by both event ID and owner, matching the authorization check above.
     const result = await prisma.event.deleteMany({
       where: { id, userId },
     });
