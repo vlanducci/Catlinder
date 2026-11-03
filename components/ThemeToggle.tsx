@@ -1,34 +1,55 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+
+const themeChangeEvent = "catlinder-theme-change";
+
+function subscribeToTheme(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(themeChangeEvent, onChange);
+
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(themeChangeEvent, onChange);
+  };
+}
+
+function getThemeSnapshot() {
+  return localStorage.getItem("catlinder-theme") === "light";
+}
+
+function getServerThemeSnapshot() {
+  return false;
+}
 
 export default function ThemeToggle() {
-  const [isDark, setIsDark] = useState(false);
+  const isLight = useSyncExternalStore(
+    subscribeToTheme,
+    getThemeSnapshot,
+    getServerThemeSnapshot
+  );
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("catlinder-theme");
-    const dark = savedTheme === "dark";
-
-    document.documentElement.classList.toggle("dark", dark);
-    setIsDark(dark);
-  }, []);
+    document.documentElement.classList.toggle("light", isLight);
+  }, [isLight]);
 
   const toggleTheme = () => {
-    const nextIsDark = !isDark;
+    const nextIsLight = !isLight;
 
-    document.documentElement.classList.toggle("dark", nextIsDark);
-    localStorage.setItem("catlinder-theme", nextIsDark ? "dark" : "light");
-    setIsDark(nextIsDark);
+    localStorage.setItem("catlinder-theme", nextIsLight ? "light" : "dark");
+    window.dispatchEvent(new Event(themeChangeEvent));
   };
 
   return (
     <button
       type="button"
       onClick={toggleTheme}
+      aria-label={`Switch to ${isLight ? "dark" : "light"} theme`}
+      aria-pressed={isLight}
       className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-[var(--foreground)] transition hover:opacity-80"
     >
-      {isDark ? "☀️" : "🌙"}
+      {isLight ? "☀️" : "🌙"}
     </button>
   );
 }

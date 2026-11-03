@@ -1,11 +1,11 @@
-
 "use client";
 
-const eventColors = [
-  { name: "Red", value: "--event-color-01" },
-  { name: "Yellow", value: "--event-color-02" },
-  { name: "Green", value: "--event-color-03" },
-  { name: "Blue", value: "--event-color-04" },
+
+export const eventColors = [
+  { value: "#f87171", cssVariable: "--event-color-01" },
+  { value: "#fbbf24", cssVariable: "--event-color-02" },
+  { value: "#34d399", cssVariable: "--event-color-03" },
+  { value: "#60a5fa", cssVariable: "--event-color-04" },
 ];
 
 type EventModalProps = {
@@ -44,6 +44,8 @@ export default function EventModal({
   onSave,
   onDelete,
   isEditing,
+
+  // Destructures the props passed to the EventModal component, which include the event details, state setters, and callback functions for closing, saving, and deleting the event.
 }: EventModalProps) {
   const inputClass =
     "w-full rounded-lg border border-[var(--border)] bg-[var(--background)] p-2 text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]";
@@ -103,7 +105,7 @@ export default function EventModal({
             onChange={(e) => setEndDate(e.target.value)}
             className={inputClass}
           />
-        </label> 
+        </label>
 
         <div className="grid grid-cols-2 gap-3">
           <label className="block space-y-1">
@@ -137,8 +139,7 @@ export default function EventModal({
               <button
                 key={eventColor.value}
                 type="button"
-                title={eventColor.name}
-                aria-label={`${eventColor.name} event colour`}
+                aria-label={`Use ${eventColor.value} event colour`}
                 aria-pressed={color === eventColor.value}
                 onClick={() => setColor(eventColor.value)}
                 className={`flex h-9 w-9 items-center justify-center rounded-full transition ${
@@ -146,9 +147,7 @@ export default function EventModal({
                     ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--surface)]"
                     : "hover:scale-110"
                 }`}
-                style={{
-                  backgroundColor: `var(${eventColor.value})`,
-                }}
+                style={{ backgroundColor: eventColor.value }}
               >
                 {color === eventColor.value && (
                   <span className="font-bold text-slate-900">✓</span>
@@ -156,9 +155,6 @@ export default function EventModal({
               </button>
             ))}
           </div>
-          <p className="text-xs text-[var(--muted)]">
-            Selected: {eventColors.find((c) => c.value === color)?.name ?? "Custom"}
-          </p>
         </fieldset>
 
         <div className="flex items-center justify-between gap-2">

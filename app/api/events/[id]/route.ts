@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import Color from "color";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -19,21 +20,42 @@ export async function PATCH(request: Request, { params }: Context) {
     const { id } = await params;
     const body = await request.json();
 
-    const title = typeof body.title === "string" ? body.title.trim() : "";
+    const title =
+      typeof body.title === "string" ? body.title.trim() : "";
     const start = new Date(body.start);
     const end = new Date(body.end);
-    const color = typeof body.color === "string" ? body.color : "#60a5fa";
+    const color =
+      typeof body.color === "string" && body.color.trim()
+        ? body.color.trim()
+        : "#60a5fa";
+
+    const errors: string[] = [];
+
+    if (!title) errors.push("Missing title");
+    if (title.length > 200) errors.push("Title exceeds 200 characters");
+    if (!Number.isFinite(start.getTime())) errors.push("Invalid start date");
+    if (!Number.isFinite(end.getTime())) errors.push("Invalid end date");
 
     if (
-      !title ||
-      title.length > 200 ||
-      !Number.isFinite(start.getTime()) ||
-      !Number.isFinite(end.getTime()) ||
-      end <= start ||
-      !/^#[0-9a-fA-F]{6}$/.test(color)
+      Number.isFinite(start.getTime()) &&
+      Number.isFinite(end.getTime()) &&
+      end <= start
     ) {
+      errors.push("End must be after start");
+    }
+
+
+    if (errors.length > 0) {
+      console.error("Event validation failed:", {
+        title,
+        start: body.start,
+        end: body.end,
+        color,
+        errors,
+      });
+
       return NextResponse.json(
-        { error: "Invalid event data" },
+        { error: "Invalid event data", details: errors },
         { status: 400 }
       );
     }
@@ -44,7 +66,10 @@ export async function PATCH(request: Request, { params }: Context) {
     });
 
     if (result.count === 0) {
-      return NextResponse.json({ error: "Event not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Event not found" },
+        { status: 404 }
+      );
     }
 
     const event = await prisma.event.findFirst({
@@ -52,7 +77,9 @@ export async function PATCH(request: Request, { params }: Context) {
     });
 
     return NextResponse.json(event);
-  } catch {
+  } catch (error) {
+    console.error("Unable to update event:", error);
+
     return NextResponse.json(
       { error: "Unable to update event" },
       { status: 400 }
@@ -68,15 +95,27 @@ export async function DELETE(_request: Request, { params }: Context) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id } = await params;
+  try {
+    const { id } = await params;
 
-  const result = await prisma.event.deleteMany({
-    where: { id, userId },
-  });
+    const result = await prisma.event.deleteMany({
+      where: { id, userId },
+    });
 
-  if (result.count === 0) {
-    return NextResponse.json({ error: "Event not found" }, { status: 404 });
+    if (result.count === 0) {
+      return NextResponse.json(
+        { error: "Event not found" },
+        { status: 404 }
+      );
+    }
+
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    console.error("Unable to delete event:", error);
+
+    return NextResponse.json(
+      { error: "Unable to delete event" },
+      { status: 500 }
+    );
   }
-
-  return new NextResponse(null, { status: 204 });
 }

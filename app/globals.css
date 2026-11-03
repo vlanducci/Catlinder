@@ -1,5 +1,3 @@
-
-
 @import "tailwindcss";
 
 :root {
@@ -100,28 +98,11 @@ body {
   background: var(--calendar-today) !important;
 }
 
-.fc .fc-daygrid-event {
-  cursor: pointer;
-}
-
-
-.fc .fc-event {
-  border-width: 1px;
-}
-
 .fc .fc-daygrid-event,
 .fc .fc-timegrid-event {
   cursor: pointer;
 }
 
-.fc .fc-event .fc-event-main {
-  color: inherit;
-}
-
 .fc .fc-event {
   border-width: 1px;
-}
-
-.fc .fc-event .fc-event-main {
-  color: #1e293b;
 }

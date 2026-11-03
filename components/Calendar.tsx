@@ -1,4 +1,7 @@
+
 "use client";
+
+// This component manages the calendar interface, including creating, editing, deleting, loading and displaying calendar events.
 
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/react/daygrid";
@@ -7,13 +10,14 @@ import interactionPlugin from "@fullcalendar/react/interaction";
 import themePlugin from "@fullcalendar/react/themes/pulse";
 import "@fullcalendar/react/skeleton.css";
 import "@fullcalendar/react/themes/pulse/theme.css";
-import EventModal from "./EventModal";
+import EventModal, { eventColors } from "./EventModal";
 import ThemeToggle from "./ThemeToggle";
 import { signOut } from "next-auth/react";
 import { useEffect, useState } from "react";
 
-const defaultColor = "#60a5fa";
+const defaultEventColor = eventColors[0].value;
 
+// Defines the structure of a calendar event returned by the API.
 type CalendarEvent = {
   id: string;
   title: string;
@@ -22,44 +26,51 @@ type CalendarEvent = {
   color: string;
 };
 
-export default function Calendar() {
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [selectedDate, setSelectedDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [title, setTitle] = useState("");
-  const [startTime, setStartTime] = useState("09:00");
-  const [endTime, setEndTime] = useState("10:00");
-  const [color, setColor] = useState(defaultColor);
-  const [editingEventId, setEditingEventId] = useState<string | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
-  const [isMounted, setIsMounted] = useState(false);
-  const [today, setToday] = useState("");
+const normalizeEventColor = (color: string) =>
+  eventColors.find((eventColor) => eventColor.cssVariable === color)?.value ??
+  color;
 
+export default function Calendar() {
+  const [events, setEvents] = useState<CalendarEvent[]>([]);  // Stores the list of events fetched from the API.
+  const [selectedDate, setSelectedDate] = useState("");  // Stores the date selected by the user for creating or editing an event.
+  const [endDate, setEndDate] = useState("");  // Stores the end date for the event being created or edited.
+  const [title, setTitle] = useState("");  // Stores the title of the event being created or edited.
+  const [startTime, setStartTime] = useState("09:00");  // Stores the start time for the event being created or edited.
+  const [endTime, setEndTime] = useState("10:00");  // Stores the end time for the event being created or edited.
+  const [color, setColor] = useState(defaultEventColor);  // Stores the colour for the event being created or edited.
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);  // Stores the ID of the event currently being edited, or null if creating a new event.
+  const [isOpen, setIsOpen] = useState(false);  // Controls the visibility of the event modal.
+
+  // Returns the current date in YYYY-MM-DD format, which is used to pre-fill the date when creating a new event.
   const getLocalDate = () => {
     const date = new Date();
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
+
     return `${year}-${month}-${day}`;
   };
 
+  // Opens the event modal for creating a new event, pre-filling the date and resetting other fields.
   const openModal = (date: string) => {
-    setSelectedDate(date.slice(0, 10));
-    setEndDate(date.slice(0, 10));
+    const dateOnly = date.slice(0, 10);
+
+    setSelectedDate(dateOnly);
+    setEndDate(dateOnly);
     setTitle("");
     setStartTime("09:00");
     setEndTime("10:00");
-    setColor(defaultColor);
+    setColor(defaultEventColor);
     setEditingEventId(null);
     setIsOpen(true);
   };
 
+  // Prepares the event modal for editing an existing event.
   const editEvent = (event: {
     id: string;
     title: string;
     start: Date | null;
     end: Date | null;
-    color: string;
   }) => {
     if (!event.start) return;
 
@@ -77,13 +88,23 @@ export default function Calendar() {
     );
     setStartTime(`${pad(date.getHours())}:${pad(date.getMinutes())}`);
     setEndTime(`${pad(end.getHours())}:${pad(end.getMinutes())}`);
-    setColor(event.color || defaultColor);
+
+    // Finds the saved event in the local state to retrieve its colour.
+    const savedEvent = events.find((item) => item.id === event.id);
+    setColor(
+      savedEvent
+        ? normalizeEventColor(savedEvent.color)
+        : defaultEventColor
+    );
+
     setIsOpen(true);
   };
 
+  // Saves the event data to the backend and updates the local state.
   const saveEvent = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+    e.preventDefault();  // Prevents the default form submission behavior to handle it via JavaScript.
 
+    // Validates the input fields before proceeding with the save operation.
     if (
       !title.trim() ||
       endDate < selectedDate ||
@@ -92,29 +113,37 @@ export default function Calendar() {
       return;
     }
 
+    console.log("Selected colour before save:", color);
+    // Prepares the event data to be sent to the backend API, including title, start and end times, and colour.
     const eventData = {
       title: title.trim(),
       start: new Date(`${selectedDate}T${startTime}:00`).toISOString(),
       end: new Date(`${endDate}T${endTime}:00`).toISOString(),
-      color,
+      color: normalizeEventColor(color),
     };
 
+    
+    // Sends the event data to the backend API, either creating a new event or updating an existing one based on whether an event ID is present.
     try {
       const response = await fetch(
-        editingEventId ? `/api/events/${editingEventId}` : "/api/events",
+        editingEventId ? `/api/events/${editingEventId}` : "/api/events",  // Determines the API endpoint based on whether an event is being edited or created.
         {
-          method: editingEventId ? "PATCH" : "POST",
+          method: editingEventId ? "PATCH" : "POST",  // Uses PATCH for updating an existing event and POST for creating a new one.
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(eventData),
         }
       );
 
+      // Checks if the response from the server indicates a successful operation. If not, it logs the error and throws an exception.
       if (!response.ok) {
-        throw new Error("Failed to save event");
+        const errorText = await response.text();
+        console.error("Save failed:", response.status, errorText);
+        throw new Error(`Save failed (${response.status}): ${errorText}`);
       }
 
-      const savedEvent: CalendarEvent = await response.json();
+      const savedEvent: CalendarEvent = await response.json();  // Parses the response from the server to get the saved event data.
 
+      // Updates the local state with the newly saved event. If editing, it replaces the existing event; if creating, it adds the new event to the list.
       setEvents((previous) =>
         editingEventId
           ? previous.map((event) =>
@@ -122,14 +151,14 @@ export default function Calendar() {
             )
           : [...previous, savedEvent]
       );
-
       setIsOpen(false);
     } catch (error) {
       console.error("Error saving event:", error);
-      alert("Could not save the event. Please try again.");
+      alert(error instanceof Error ? error.message : "Could not save event");
     }
   };
 
+  //  Deletes the currently selected event from the backend and updates the local state accordingly.
   const deleteEvent = async () => {
     if (!editingEventId) return;
 
@@ -142,6 +171,7 @@ export default function Calendar() {
         throw new Error("Failed to delete event");
       }
 
+      // Updates the local state to remove the deleted event from the list of events.
       setEvents((previous) =>
         previous.filter((event) => event.id !== editingEventId)
       );
@@ -153,10 +183,8 @@ export default function Calendar() {
     }
   };
 
+  // Loads the events from the backend API when the component is first mounted. This ensures that the calendar displays the most up-to-date events.
   useEffect(() => {
-    setIsMounted(true);
-    setToday(getLocalDate());
-
     const loadEvents = async () => {
       try {
         const response = await fetch("/api/events");
@@ -179,6 +207,7 @@ export default function Calendar() {
     <main className="min-h-screen bg-[var(--background)] p-4 text-[var(--foreground)] sm:p-6">
       <header className="mb-6 flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">Catlinder</h1>
+
         <div className="flex items-center gap-3">
           <ThemeToggle />
           <button
@@ -202,17 +231,15 @@ export default function Calendar() {
           initialView="dayGridMonth"
           height="auto"
           eventDisplay="block"
-          eventColor={defaultColor}
           dateClick={(info) => openModal(info.dateStr)}
-          eventClick={(info) =>
+          eventClick={(info) => {
             editEvent({
               id: info.event.id,
               title: info.event.title,
               start: info.event.start,
               end: info.event.end,
-              color: events.find((event) => event.id === info.event.id)?.color || defaultColor,
-            })
-          }
+            });
+          }}
           headerToolbar={{
             left: "prev,today,next",
             center: "title",
@@ -229,9 +256,7 @@ export default function Calendar() {
             title: event.title,
             start: event.start,
             end: event.end,
-            backgroundColor: event.color,
-            borderColor: event.color,
-            textColor: "#1e293b",
+            color: normalizeEventColor(event.color),
           }))}
         />
       </section>
