@@ -1,3 +1,5 @@
+
+
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
@@ -5,6 +7,8 @@ import {
   verifyOutlookOAuthState,
 } from "@/lib/outlook-oauth";
 
+
+// define the types for the Google token response and profile
 type GoogleTokenResponse = {
   access_token?: string;
   refresh_token?: string;
@@ -14,12 +18,14 @@ type GoogleTokenResponse = {
   id_token?: string;
 };
 
+
+// define the types for the Google profile response
 type GoogleProfile = {
   sub: string;
   email?: string;
   name?: string;
 };
-
+ // Helper function to get a cookie value by name from the request
 function getCookie(request: Request, name: string) {
   const cookie = request.headers
     .get("cookie")
@@ -30,6 +36,7 @@ function getCookie(request: Request, name: string) {
   return cookie ? decodeURIComponent(cookie.slice(name.length + 1)) : undefined;
 }
 
+// Helper function to redirect with a specific status and clear the Google OAuth cookie
 function redirectWithStatus(request: Request, status: string) {
   const url = new URL("/", request.url);
   url.searchParams.set("google", status);
@@ -49,6 +56,7 @@ function redirectWithStatus(request: Request, status: string) {
   });
 }
 
+// The GET function handles the callback from Google OAuth, verifies the state, exchanges the authorization code for tokens, retrieves the user's profile, and links the Google account to the authenticated user in the database.
 export async function GET(request: Request) {
   const session = await auth();
   const url = new URL(request.url);

@@ -1,5 +1,17 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  CalendarTokenError,
+  getCalendarAccessToken,
+} from "@/lib/calendar-provider-auth";
+
+type CreateEventBody = {
+  calendarId?: unknown;
+  title?: unknown;
+  start?: unknown;
+  end?: unknown;
+  allDay?: unknown;
+};
 
 type GoogleCalendarListEntry = {
   id: string;
@@ -13,16 +25,12 @@ type GoogleEvent = {
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
   status?: string;
+  colorId?: string;
 };
 
 type GooglePage<T> = {
   items?: T[];
   nextPageToken?: string;
-};
-
-type GoogleTokenResponse = {
-  access_token?: string;
-  expires_in?: number;
 };
 
 class GoogleCalendarError extends Error {
@@ -34,77 +42,140 @@ class GoogleCalendarError extends Error {
   }
 }
 
-async function getAccessToken(
-  account: {
-    id: string;
-    access_token: string | null;
-    refresh_token: string | null;
-    expires_at: number | null;
-  },
-  forceRefresh = false
-) {
-  if (
-    !forceRefresh &&
-    account.access_token &&
-    account.expires_at &&
-    account.expires_at > Math.floor(Date.now() / 1000) + 60
-  ) {
-    return account.access_token;
+export async function POST(request: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return Response.json({ error: "Unauthorised" }, { status: 401 });
   }
 
-  if (!account.refresh_token) {
-    throw new GoogleCalendarError(
-      401,
-      "Google re-authentication required for this account"
+  try {
+    const body: CreateEventBody = await request.json();
+    if (
+      typeof body.calendarId !== "string" ||
+      typeof body.title !== "string" ||
+      typeof body.start !== "string" ||
+      typeof body.end !== "string"
+    ) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const [accountId, ...calendarIdParts] = body.calendarId.split(":");
+    const googleCalendarId = calendarIdParts.join(":");
+    const title = body.title.trim();
+    const start = new Date(body.start);
+    const end = new Date(body.end);
+    const allDay = body.allDay === true;
+
+    if (
+      !accountId ||
+      !googleCalendarId ||
+      !title ||
+      title.length > 200 ||
+      !Number.isFinite(start.getTime()) ||
+      !Number.isFinite(end.getTime()) ||
+      end <= start
+    ) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const account = await prisma.account.findFirst({
+      where: {
+        id: accountId,
+        userId: session.user.id,
+        provider: "google",
+      },
+    });
+    if (!account) {
+      return Response.json({ error: "Google account not found" }, { status: 404 });
+    }
+
+    let accessToken = await getCalendarAccessToken(account, "google");
+    const createGoogleEvent = async (token: string) => {
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(googleCalendarId)}/events`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            summary: title,
+            start: allDay
+              ? { date: start.toISOString().slice(0, 10) }
+              : { dateTime: start.toISOString() },
+            end: allDay
+              ? { date: end.toISOString().slice(0, 10) }
+              : { dateTime: end.toISOString() },
+          }),
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        throw new GoogleCalendarError(
+          response.status,
+          `Unable to create Google Calendar event (${response.status}): ${await response.text()}`
+        );
+      }
+
+      return response.json() as Promise<GoogleEvent>;
+    };
+
+    let createdEvent: GoogleEvent;
+    try {
+      createdEvent = await createGoogleEvent(accessToken);
+    } catch (error) {
+      if (
+        !(
+          error instanceof GoogleCalendarError ||
+          error instanceof CalendarTokenError
+        ) ||
+        error.status !== 401
+      ) {
+        throw error;
+      }
+      accessToken = await getCalendarAccessToken(account, "google", true);
+      createdEvent = await createGoogleEvent(accessToken);
+    }
+
+    const eventStart = createdEvent.start?.dateTime ?? createdEvent.start?.date;
+    const eventEnd = createdEvent.end?.dateTime ?? createdEvent.end?.date;
+    if (!createdEvent.id || !eventStart || !eventEnd) {
+      throw new Error("Google created an event but returned incomplete details");
+    }
+
+    return Response.json(
+      {
+        id: `google-${account.id}-${googleCalendarId}-${createdEvent.id}`,
+        calendarId: body.calendarId,
+        title: createdEvent.summary || title,
+        start: eventStart,
+        end: eventEnd,
+        allDay: Boolean(createdEvent.start?.date),
+        color: "var(--event-color-google)",
+        provider: "google",
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error("Unable to create Google Calendar event:", error);
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to create Google Calendar event",
+      },
+      {
+        status:
+          error instanceof GoogleCalendarError ||
+          error instanceof CalendarTokenError
+            ? error.status
+            : 500,
+      }
     );
   }
-
-  const clientId = process.env.AUTH_GOOGLE_ID;
-  const clientSecret = process.env.AUTH_GOOGLE_SECRET;
-  if (!clientId || !clientSecret) {
-    throw new GoogleCalendarError(
-      500,
-      "Google authentication configuration is missing"
-    );
-  }
-
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      grant_type: "refresh_token",
-      refresh_token: account.refresh_token,
-    }),
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const details = await response.text();
-    throw new GoogleCalendarError(
-      401,
-      `Unable to refresh Google access token: ${details}`
-    );
-  }
-
-  const tokens: GoogleTokenResponse = await response.json();
-  if (!tokens.access_token || !tokens.expires_in) {
-    throw new GoogleCalendarError(
-      401,
-      "Google did not return a usable access token"
-    );
-  }
-
-  await prisma.account.update({
-    where: { id: account.id },
-    data: {
-      access_token: tokens.access_token,
-      expires_at: Math.floor(Date.now() / 1000) + tokens.expires_in,
-    },
-  });
-
-  return tokens.access_token;
 }
 
 async function fetchGooglePages<T>(
@@ -178,7 +249,7 @@ export async function GET(request: Request) {
     start: string;
     end: string;
     allDay: boolean;
-    color: string;
+    color: "var(--event-color-google)";
     provider: "google";
   }[] = [];
   const errors: { accountName: string; message: string }[] = [];
@@ -268,16 +339,22 @@ export async function GET(request: Request) {
     };
 
     try {
-      const token = await getAccessToken(account);
+      const token = await getCalendarAccessToken(account, "google");
       let result: Awaited<ReturnType<typeof loadAccountCalendars>>;
       try {
         result = await loadAccountCalendars(token);
       } catch (error) {
-        if (!(error instanceof GoogleCalendarError) || error.status !== 401) {
+        if (
+          !(
+            error instanceof GoogleCalendarError ||
+            error instanceof CalendarTokenError
+          ) ||
+          error.status !== 401
+        ) {
           throw error;
         }
         result = await loadAccountCalendars(
-          await getAccessToken(account, true)
+          await getCalendarAccessToken(account, "google", true)
         );
       }
 

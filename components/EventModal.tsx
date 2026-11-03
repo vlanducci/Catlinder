@@ -8,6 +8,14 @@ export const eventColorVariables = [
 ];
 
 type EventModalProps = {
+  calendars: {
+    id: string;
+    name: string;
+    accountName: string;
+    provider: "google" | "outlook";
+  }[];
+  destinationCalendarId: string;
+  setDestinationCalendarId: (value: string) => void;
   selectedDate: string;
   title: string;
   startTime: string;
@@ -27,6 +35,9 @@ type EventModalProps = {
 };
 
 export default function EventModal({
+  calendars,
+  destinationCalendarId,
+  setDestinationCalendarId,
   selectedDate,
   endDate,
   title,
@@ -84,6 +95,26 @@ export default function EventModal({
           />
         </label>
 
+        {!isEditing && (
+          <label className="block space-y-1">
+            <span className="text-sm font-medium">Add to calendar</span>
+            <select
+              value={destinationCalendarId}
+              onChange={(event) =>
+                setDestinationCalendarId(event.target.value)
+              }
+              className={inputClass}
+            >
+              <option value="">Catlinder</option>
+              {calendars.map((calendar) => (
+                <option key={calendar.id} value={calendar.id}>
+                  {calendar.name} — {calendar.accountName}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
         <label className="block space-y-1">
           <span className="text-sm font-medium">Date</span>
           <input
@@ -131,30 +162,32 @@ export default function EventModal({
           </label>
         </div>
 
-        <fieldset className="space-y-2">
-          <legend className="text-sm font-medium">Event colour</legend>
-          <div className="flex items-center gap-3">
-            {eventColorVariables.map((eventColor, index) => (
-              <button
-                key={eventColor}
-                type="button"
-                aria-label={`Use event colour ${index + 1}`}
-                aria-pressed={color === `var(${eventColor})`}
-                onClick={() => setColor(`var(${eventColor})`)}
-                className={`flex h-9 w-9 items-center justify-center rounded-full transition ${
-                  color === `var(${eventColor})`
-                    ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--surface)]"
-                    : "hover:scale-110"
-                }`}
-                style={{ backgroundColor: `var(${eventColor})` }}
-              >
-                {color === `var(${eventColor})` && (
-                  <span className="font-bold text-slate-900">✓</span>
-                )}
-              </button>
-            ))}
-          </div>
-        </fieldset>
+        {(!destinationCalendarId || isEditing) && (
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">Event colour</legend>
+            <div className="flex items-center gap-3">
+              {eventColorVariables.map((eventColor, index) => (
+                <button
+                  key={eventColor}
+                  type="button"
+                  aria-label={`Use event colour ${index + 1}`}
+                  aria-pressed={color === `var(${eventColor})`}
+                  onClick={() => setColor(`var(${eventColor})`)}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full transition ${
+                    color === `var(${eventColor})`
+                      ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--surface)]"
+                      : "hover:scale-110"
+                  }`}
+                  style={{ backgroundColor: `var(${eventColor})` }}
+                >
+                  {color === `var(${eventColor})` && (
+                    <span className="font-bold text-slate-900">✓</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        )}
 
         <div className="flex items-center justify-between gap-2">
           {isEditing && (

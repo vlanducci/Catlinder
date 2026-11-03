@@ -5,6 +5,7 @@ import {
   signOutlookOAuthState,
 } from "@/lib/outlook-oauth";
 
+// The GET function initiates the Google OAuth flow by generating a state and code verifier, constructing the authorization URL, and redirecting the user to Google's OAuth endpoint. It also sets a cookie with the signed state for later verification during the callback.
 export async function GET(request: Request) {
   const session = await auth();
 

@@ -12,7 +12,9 @@ export type CalendarOption = {
 type CalendarMenuProps = {
   calendars: CalendarOption[];
   selectedCalendarIds: string[];
+  calendarColors: Record<string, string>;
   onToggleCalendar: (calendarId: string) => void;
+  onCalendarColorChange: (calendarId: string, color: string) => void;
   onSelectAll: () => void;
   onClearAll: () => void;
 };
@@ -20,7 +22,9 @@ type CalendarMenuProps = {
 export default function CalendarMenu({
   calendars,
   selectedCalendarIds,
+  calendarColors,
   onToggleCalendar,
+  onCalendarColorChange,
   onSelectAll,
   onClearAll,
 }: CalendarMenuProps) {
@@ -97,38 +101,47 @@ export default function CalendarMenu({
 
           {calendars.length === 0 ? (
             <p className="rounded-lg bg-[var(--background)] p-3 text-sm text-[var(--muted)]">
-              No Outlook calendars were found.
+              No external calendars were found.
             </p>
           ) : (
             <ul className="max-h-64 space-y-1 overflow-y-auto">
               {calendars.map((calendar) => (
                 <li key={calendar.id}>
-                  <label className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-[var(--background)]">
+                  <div className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-[var(--background)]">
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedCalendarIds.includes(calendar.id)}
+                        onChange={() => onToggleCalendar(calendar.id)}
+                        className="accent-[var(--accent)]"
+                      />
+                      <span
+                        aria-hidden="true"
+                        className="h-3 w-3 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor: calendarColors[calendar.id],
+                        }}
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm">
+                          {calendar.name}
+                        </span>
+                        <span className="block truncate text-xs text-[var(--muted)]">
+                          {calendar.accountName}
+                        </span>
+                      </span>
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={selectedCalendarIds.includes(calendar.id)}
-                      onChange={() => onToggleCalendar(calendar.id)}
-                      className="accent-[var(--accent)]"
+                      type="color"
+                      value={calendarColors[calendar.id] ?? "#000000"}
+                      onChange={(event) =>
+                        onCalendarColorChange(calendar.id, event.target.value)
+                      }
+                      onClick={(event) => event.stopPropagation()}
+                      aria-label={`Choose ${calendar.name} calendar colour`}
+                      className="h-7 w-8 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0"
                     />
-                    <span
-                      aria-hidden="true"
-                      className="h-3 w-3 shrink-0 rounded-full"
-                      style={{
-                        backgroundColor:
-                          calendar.provider === "google"
-                            ? "var(--event-color-google)"
-                            : "var(--event-color-outlook)",
-                      }}
-                    />
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm">
-                        {calendar.name}
-                      </span>
-                      <span className="block truncate text-xs text-[var(--muted)]">
-                        {calendar.accountName}
-                      </span>
-                    </span>
-                  </label>
+                  </div>
                 </li>
               ))}
             </ul>

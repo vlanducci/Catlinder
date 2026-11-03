@@ -1,12 +1,16 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getMicrosoftOAuthConfig } from "@/lib/outlook-oauth";
+import {
+  CalendarTokenError,
+  getCalendarAccessToken,
+} from "@/lib/calendar-provider-auth";
 
-type MicrosoftTokenResponse = {
-  access_token?: string;
-  refresh_token?: string;
-  expires_in: number;
-  scope?: string;
+type CreateEventBody = {
+  calendarId?: unknown;
+  title?: unknown;
+  start?: unknown;
+  end?: unknown;
+  allDay?: unknown;
 };
 
 type MicrosoftCalendar = {
@@ -53,88 +57,146 @@ const formatDate = (dateTime: string) =>
     ? dateTime
     : `${dateTime}Z`;
 
-async function getAccountAccessToken(
-  account: {
-    id: string;
-    access_token: string | null;
-    refresh_token: string | null;
-    expires_at: number | null;
-    scope: string | null;
-  },
-  forceRefresh = false
-) {
-  if (
-    !forceRefresh &&
-    account.access_token &&
-    account.expires_at &&
-    account.expires_at > Math.floor(Date.now() / 1000) + 300
-  ) {
-    return account.access_token;
+export async function POST(request: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return Response.json({ error: "Unauthorised" }, { status: 401 });
   }
 
-  if (!account.refresh_token) {
-    throw new MicrosoftGraphError(
-      401,
-      "Microsoft re-authentication required for this account"
-    );
-  }
-
-  let tokenUrl: string;
-  let clientId: string;
-  let clientSecret: string;
   try {
-    const config = getMicrosoftOAuthConfig();
-    tokenUrl = config.tokenUrl;
-    clientId = config.clientId;
-    clientSecret = config.clientSecret;
-  } catch {
-    throw new MicrosoftGraphError(
-      500,
-      "Microsoft authentication configuration is missing"
+    const body: CreateEventBody = await request.json();
+    if (
+      typeof body.calendarId !== "string" ||
+      typeof body.title !== "string" ||
+      typeof body.start !== "string" ||
+      typeof body.end !== "string"
+    ) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const [accountId, ...calendarIdParts] = body.calendarId.split(":");
+    const graphCalendarId = calendarIdParts.join(":");
+    const title = body.title.trim();
+    const start = new Date(body.start);
+    const end = new Date(body.end);
+    const allDay = body.allDay === true;
+
+    if (
+      !accountId ||
+      !graphCalendarId ||
+      !title ||
+      title.length > 200 ||
+      !Number.isFinite(start.getTime()) ||
+      !Number.isFinite(end.getTime()) ||
+      end <= start
+    ) {
+      return Response.json({ error: "Invalid event data" }, { status: 400 });
+    }
+
+    const account = await prisma.account.findFirst({
+      where: {
+        id: accountId,
+        userId: session.user.id,
+        provider: "microsoft-entra-id",
+      },
+    });
+    if (!account) {
+      return Response.json({ error: "Outlook account not found" }, { status: 404 });
+    }
+
+    let accessToken = await getCalendarAccessToken(account, "outlook");
+    const createGraphEvent = async (token: string) => {
+      const response = await fetch(
+        `https://graph.microsoft.com/v1.0/me/calendars/${encodeURIComponent(graphCalendarId)}/events`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Prefer: 'outlook.timezone="UTC"',
+          },
+          body: JSON.stringify({
+            subject: title,
+            start: {
+              dateTime: allDay
+                ? `${start.toISOString().slice(0, 10)}T00:00:00`
+                : start.toISOString().slice(0, 19),
+              timeZone: "UTC",
+            },
+            end: {
+              dateTime: allDay
+                ? `${end.toISOString().slice(0, 10)}T00:00:00`
+                : end.toISOString().slice(0, 19),
+              timeZone: "UTC",
+            },
+            isAllDay: allDay,
+          }),
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        throw new MicrosoftGraphError(
+          response.status,
+          `Unable to create Outlook event (${response.status}): ${await response.text()}`
+        );
+      }
+
+      return response.json() as Promise<MicrosoftEvent>;
+    };
+
+    let createdEvent: MicrosoftEvent;
+    try {
+      createdEvent = await createGraphEvent(accessToken);
+    } catch (error) {
+      if (
+        !(
+          error instanceof MicrosoftGraphError ||
+          error instanceof CalendarTokenError
+        ) ||
+        error.status !== 401
+      ) {
+        throw error;
+      }
+      accessToken = await getCalendarAccessToken(account, "outlook", true);
+      createdEvent = await createGraphEvent(accessToken);
+    }
+
+    return Response.json(
+      {
+        id: `outlook-${account.id}-${graphCalendarId}-${createdEvent.id}`,
+        calendarId: body.calendarId,
+        title: createdEvent.subject || title,
+        start: createdEvent.isAllDay
+          ? createdEvent.start.dateTime.slice(0, 10)
+          : formatDate(createdEvent.start.dateTime),
+        end: createdEvent.isAllDay
+          ? createdEvent.end.dateTime.slice(0, 10)
+          : formatDate(createdEvent.end.dateTime),
+        allDay: createdEvent.isAllDay,
+        color: "var(--event-color-outlook)",
+        provider: "outlook",
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error("Unable to create Outlook event:", error);
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to create Outlook event",
+      },
+      {
+        status:
+          error instanceof MicrosoftGraphError ||
+          error instanceof CalendarTokenError
+            ? error.status
+            : 500,
+      }
     );
   }
-
-  const response = await fetch(tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      grant_type: "refresh_token",
-      refresh_token: account.refresh_token,
-      scope:
-        "openid profile email User.Read Calendars.ReadWrite Calendars.ReadWrite.Shared offline_access",
-    }),
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const details = await response.text();
-    throw new MicrosoftGraphError(
-      401,
-      `Unable to refresh Microsoft access token: ${details}`
-    );
-  }
-
-  const tokens: MicrosoftTokenResponse = await response.json();
-  if (!tokens.access_token || !tokens.expires_in) {
-    throw new MicrosoftGraphError(
-      401,
-      "Microsoft did not return a usable access token"
-    );
-  }
-
-  await prisma.account.update({
-    where: { id: account.id },
-    data: {
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token ?? account.refresh_token,
-      expires_at: Math.floor(Date.now() / 1000) + tokens.expires_in,
-      scope: tokens.scope ?? account.scope,
-    },
-  });
-
-  return tokens.access_token;
 }
 
 async function fetchMicrosoftCollection<T>(
@@ -228,7 +290,7 @@ export async function GET(request: Request) {
       let accountName = "Microsoft account";
 
       try {
-        let accessToken = await getAccountAccessToken(account);
+        let accessToken = await getCalendarAccessToken(account, "outlook");
 
         const loadAccountCalendars = async (token: string) => {
           const profileResponse = await fetch(
@@ -412,11 +474,17 @@ export async function GET(request: Request) {
           events.push(...result.accountEvents);
           errors.push(...result.accountErrors);
         } catch (error) {
-          if (!(error instanceof MicrosoftGraphError) || error.status !== 401) {
+          if (
+            !(
+              error instanceof MicrosoftGraphError ||
+              error instanceof CalendarTokenError
+            ) ||
+            error.status !== 401
+          ) {
             throw error;
           }
 
-          accessToken = await getAccountAccessToken(account, true);
+          accessToken = await getCalendarAccessToken(account, "outlook", true);
           const result = await loadAccountCalendars(accessToken);
           calendars.push(...result.accountCalendars);
           events.push(...result.accountEvents);

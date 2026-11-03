@@ -53,12 +53,16 @@ export default function Calendar() {
   const [outlookEvents, setOutlookEvents] = useState<CalendarEvent[]>([]);
   const [outlookCalendars, setOutlookCalendars] = useState<CalendarOption[]>([]);
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<string[]>([]);
+  const [calendarColors, setCalendarColors] = useState<Record<string, string>>(
+    {}
+  );
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [connectionMessage, setConnectionMessage] = useState<string | null>(
     null
   );
   const outlookRequestId = useRef(0);
   const calendarSelectionInitialized = useRef(false);
+  const calendarColorsInitialized = useRef(false);
   const [events, setEvents] = useState<CalendarEvent[]>([]);  // Stores the list of events fetched from the API.
   const [selectedDate, setSelectedDate] = useState("");  // Stores the date selected by the user for creating or editing an event.
   const [endDate, setEndDate] = useState("");  // Stores the end date for the event being created or edited.
@@ -66,6 +70,7 @@ export default function Calendar() {
   const [startTime, setStartTime] = useState("09:00");  // Stores the start time for the event being created or edited.
   const [endTime, setEndTime] = useState("10:00");  // Stores the end time for the event being created or edited.
   const [color, setColor] = useState(defaultEventColor);  // Stores the colour for the event being created or edited.
+  const [destinationCalendarId, setDestinationCalendarId] = useState("");
   const [editingEventId, setEditingEventId] = useState<string | null>(null);  // Stores the ID of the event currently being edited, or null if creating a new event.
   const [isOpen, setIsOpen] = useState(false);  // Controls the visibility of the event modal.
 
@@ -161,6 +166,64 @@ export default function Calendar() {
       if (requestId === outlookRequestId.current) {
         setOutlookCalendars(calendars);
         setOutlookEvents(externalEvents);
+        if (!calendarColorsInitialized.current) {
+          const storedColors = localStorage.getItem(
+            "catlinder-calendar-colors"
+          );
+          let colors: Record<string, string> = {};
+
+          if (storedColors) {
+            try {
+              const parsed: unknown = JSON.parse(storedColors);
+              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                colors = Object.fromEntries(
+                  Object.entries(parsed).filter(
+                    ([, value]) =>
+                      typeof value === "string" &&
+                      /^#[0-9a-f]{6}$/i.test(value)
+                  )
+                );
+              }
+            } catch (error) {
+              console.error("Unable to read saved calendar colours:", error);
+            }
+          }
+
+          for (const calendar of calendars) {
+            if (!colors[calendar.id]) {
+              const variable =
+                calendar.provider === "google"
+                  ? "--event-color-google"
+                  : "--event-color-outlook";
+              colors[calendar.id] = getComputedStyle(
+                document.documentElement
+              )
+                .getPropertyValue(variable)
+                .trim();
+            }
+          }
+
+          calendarColorsInitialized.current = true;
+          setCalendarColors(colors);
+        } else {
+          setCalendarColors((previousColors) => {
+            const nextColors = { ...previousColors };
+            for (const calendar of calendars) {
+              if (!nextColors[calendar.id]) {
+                const variable =
+                  calendar.provider === "google"
+                    ? "--event-color-google"
+                    : "--event-color-outlook";
+                nextColors[calendar.id] = getComputedStyle(
+                  document.documentElement
+                )
+                  .getPropertyValue(variable)
+                  .trim();
+              }
+            }
+            return nextColors;
+          });
+        }
         setCalendarError(
           errors.length > 0
             ? errors
@@ -266,12 +329,28 @@ export default function Calendar() {
     }
   }, [selectedCalendarIds]);
 
+  useEffect(() => {
+    if (calendarColorsInitialized.current) {
+      localStorage.setItem(
+        "catlinder-calendar-colors",
+        JSON.stringify(calendarColors)
+      );
+    }
+  }, [calendarColors]);
+
   const toggleCalendar = (calendarId: string) => {
     setSelectedCalendarIds((selectedIds) =>
       selectedIds.includes(calendarId)
         ? selectedIds.filter((id) => id !== calendarId)
         : [...selectedIds, calendarId]
     );
+  };
+
+  const setCalendarColor = (calendarId: string, value: string) => {
+    setCalendarColors((previousColors) => ({
+      ...previousColors,
+      [calendarId]: value,
+    }));
   };
 
   const visibleExternalEvents = outlookEvents.filter((event) =>
@@ -288,6 +367,7 @@ export default function Calendar() {
     setStartTime("09:00");
     setEndTime("10:00");
     setColor(defaultEventColor);
+    setDestinationCalendarId("");
     setEditingEventId(null);
     setIsOpen(true);
   };
@@ -306,6 +386,7 @@ export default function Calendar() {
     const end = event.end ?? new Date(date.getTime() + 60 * 60 * 1000);
 
     setEditingEventId(event.id);
+    setDestinationCalendarId("");
     setTitle(event.title);
     setSelectedDate(
       `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
@@ -340,22 +421,34 @@ export default function Calendar() {
       return;
     }
 
-    console.log("Selected colour before save:", color);
-    // Prepares the event data to be sent to the backend API, including title, start and end times, and colour.
+    const externalCalendar = outlookCalendars.find(
+      (calendar) => calendar.id === destinationCalendarId
+    );
+    if (destinationCalendarId && !externalCalendar) {
+      alert(
+        "The selected calendar is no longer available. Refresh and try again."
+      );
+      return;
+    }
+
     const eventData = {
       title: title.trim(),
       start: new Date(`${selectedDate}T${startTime}:00`).toISOString(),
       end: new Date(`${endDate}T${endTime}:00`).toISOString(),
       color: normalizeEventColor(color),
+      ...(externalCalendar ? { calendarId: externalCalendar.id } : {}),
     };
 
-    
-    // Sends the event data to the backend API, either creating a new event or updating an existing one based on whether an event ID is present.
     try {
+      const endpoint = externalCalendar
+        ? `/api/${externalCalendar.provider}/events`
+        : editingEventId
+          ? `/api/events/${editingEventId}`
+          : "/api/events";
       const response = await fetch(
-        editingEventId ? `/api/events/${editingEventId}` : "/api/events",  // Determines the API endpoint based on whether an event is being edited or created.
+        endpoint,  // Determines the API endpoint based on whether an event is being edited or created.
         {
-          method: editingEventId ? "PATCH" : "POST",  // Uses PATCH for updating an existing event and POST for creating a new one.
+          method: editingEventId ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(eventData),
         }
@@ -371,13 +464,17 @@ export default function Calendar() {
       const savedEvent: CalendarEvent = await response.json();  // Parses the response from the server to get the saved event data.
 
       // Updates the local state with the newly saved event. If editing, it replaces the existing event; if creating, it adds the new event to the list.
-      setEvents((previous) =>
-        editingEventId
-          ? previous.map((event) =>
-              event.id === editingEventId ? savedEvent : event
-            )
-          : [...previous, savedEvent]
-      );
+      if (externalCalendar) {
+        setOutlookEvents((previous) => [...previous, savedEvent]);
+      } else {
+        setEvents((previous) =>
+          editingEventId
+            ? previous.map((event) =>
+                event.id === editingEventId ? savedEvent : event
+              )
+            : [...previous, savedEvent]
+        );
+      }
       setIsOpen(false);
     } catch (error) {
       console.error("Error saving event:", error);
@@ -439,7 +536,9 @@ export default function Calendar() {
           <CalendarMenu
             calendars={outlookCalendars}
             selectedCalendarIds={selectedCalendarIds}
+            calendarColors={calendarColors}
             onToggleCalendar={toggleCalendar}
+            onCalendarColorChange={setCalendarColor}
             onSelectAll={() =>
               setSelectedCalendarIds(
                 outlookCalendars.map((calendar) => calendar.id)
@@ -473,7 +572,7 @@ export default function Calendar() {
           outlookCalendars.length > 0 &&
           selectedCalendarIds.length === 0 && (
             <p className="mb-3 rounded-lg bg-[var(--surface)] p-3 text-sm text-[var(--muted)]">
-              No Outlook calendars are selected. Choose calendars from the
+              No external calendars are selected. Choose calendars from the
               Calendars menu to display their events.
             </p>
           )}
@@ -539,14 +638,16 @@ export default function Calendar() {
               textColor: "var(--event-text-color)",
             })),
             ...visibleExternalEvents.map((event) => ({
-                id: `outlook-${event.id}`,
+                id: event.id,
                 title: event.title,
                 start: event.start,
                 end: event.end,
                 allDay: event.allDay,
-                color: event.color,
-                backgroundColor: event.color,
-                borderColor: event.color,
+                color: calendarColors[event.calendarId ?? ""] ?? event.color,
+                backgroundColor:
+                  calendarColors[event.calendarId ?? ""] ?? event.color,
+                borderColor:
+                  calendarColors[event.calendarId ?? ""] ?? event.color,
                 textColor: "var(--event-text-color)",
               })),
           ]}
@@ -555,6 +656,9 @@ export default function Calendar() {
 
       {isOpen && (
         <EventModal
+          calendars={outlookCalendars}
+          destinationCalendarId={destinationCalendarId}
+          setDestinationCalendarId={setDestinationCalendarId}
           selectedDate={selectedDate}
           endDate={endDate}
           title={title}
