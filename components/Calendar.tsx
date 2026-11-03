@@ -64,6 +64,7 @@ export default function Calendar() {
     null
   );
   const outlookRequestId = useRef(0);
+  const calendarRange = useRef<{ start: Date; end: Date } | null>(null);
   const calendarSelectionInitialized = useRef(false);
   const calendarColorsInitialized = useRef(false);
   const [events, setEvents] = useState<CalendarEvent[]>([]);  // Stores the list of events fetched from the API.
@@ -594,6 +595,46 @@ export default function Calendar() {
     loadEvents();
   }, []);
 
+  useEffect(() => {
+    const refreshEvents = async () => {
+      try {
+        const response = await fetch("/api/events");
+
+        if (!response.ok) {
+          throw new Error("Failed to refresh local events");
+        }
+
+        const savedEvents: CalendarEvent[] = await response.json();
+        setEvents(savedEvents);
+      } catch (error) {
+        console.error("Error refreshing local events:", error);
+      }
+
+      const range = calendarRange.current;
+
+      if (range) {
+        loadExternalCalendarEvents(range.start, range.end).catch(
+          console.error
+        );
+      }
+    };
+
+    const interval = setInterval(refreshEvents, 30000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshEvents();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
   return (
     <main className="min-h-screen bg-[var(--background)] p-4 text-[var(--foreground)] sm:p-6">
       <header className="mb-6 flex items-center justify-between gap-4">
@@ -670,9 +711,12 @@ export default function Calendar() {
             });
           }}
           datesSet={(info) => {
-            loadExternalCalendarEvents(info.start, info.end).catch(
-              console.error
-            );
+            calendarRange.current = {
+              start: info.start,
+              end: info.end,
+            };
+
+            loadExternalCalendarEvents(info.start, info.end).catch(console.error);
           }}
           headerToolbar={{
             left: "prev,today,next",
